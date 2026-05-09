@@ -1,4 +1,4 @@
-import { fetchGlobalQuote, fetchDailySeries } from "@/lib/alphaVantageClient";
+import { fetchLatestBar, fetchDailyBars } from "@/lib/alpacaClient";
 
 export interface CurrentQuote {
   ticker: string;
@@ -17,19 +17,30 @@ export interface HistoricalData {
 }
 
 export async function getCurrentQuote(ticker: string): Promise<CurrentQuote> {
-  const raw = await fetchGlobalQuote(ticker);
-  const quote = raw["Global Quote"];
+  // Obtenemos las 2 últimas barras para calcular la variación diaria
+  const bars = await fetchDailyBars(ticker, 2);
 
-  if (!quote || !quote["05. price"]) {
+  if (bars.length === 0) {
     throw new Error(`No se encontraron datos para el ticker: ${ticker}`);
   }
 
+  // Las barras vienen en orden ascendente (más antigua primero)
+  const latest = bars[bars.length - 1];
+  const previous = bars.length >= 2 ? bars[bars.length - 2] : null;
+
+  const price = latest.c;
+  const previousClose = previous ? previous.c : latest.o;
+  const change = price - previousClose;
+  const changePercent = previousClose !== 0
+    ? (change / previousClose) * 100
+    : 0;
+
   return {
-    ticker: quote["01. symbol"],
-    price: parseFloat(quote["05. price"]),
-    previousClose: parseFloat(quote["08. previous close"]),
-    change: parseFloat(quote["09. change"]),
-    changePercent: parseFloat(quote["10. change percent"].replace("%", "")),
+    ticker,
+    price,
+    previousClose,
+    change,
+    changePercent,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -38,19 +49,16 @@ export async function getHistoricalCloses(
   ticker: string,
   days = 60
 ): Promise<HistoricalData> {
-  const raw = await fetchDailySeries(ticker);
-  const series = raw["Time Series (Daily)"];
+  const bars = await fetchDailyBars(ticker, days);
 
-  if (!series) {
+  if (bars.length === 0) {
     throw new Error(`No hay datos históricos para: ${ticker}`);
   }
 
-  const sortedDates = Object.keys(series).sort((a, b) =>
-    b.localeCompare(a)
-  );
+  // Invertimos para que el índice 0 sea el más reciente (requerido por TechnicalAnalysisService)
+  const reversed = [...bars].reverse();
+  const closes = reversed.map((b) => b.c);
+  const dates = reversed.map((b) => b.t.slice(0, 10));
 
-  const sliced = sortedDates.slice(0, days);
-  const closes = sliced.map((date) => parseFloat(series[date]["4. close"]));
-
-  return { ticker, closes, dates: sliced };
+  return { ticker, closes, dates };
 }
