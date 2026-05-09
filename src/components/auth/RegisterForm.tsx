@@ -47,7 +47,7 @@ export default function RegisterForm() {
           name="name"
           type="text"
           autoComplete="name"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="Tu nombre"
         />
       </div>
@@ -62,7 +62,7 @@ export default function RegisterForm() {
           type="email"
           required
           autoComplete="email"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="tu@email.com"
         />
       </div>
@@ -78,7 +78,7 @@ export default function RegisterForm() {
           required
           minLength={8}
           autoComplete="new-password"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="Mínimo 8 caracteres"
         />
       </div>
