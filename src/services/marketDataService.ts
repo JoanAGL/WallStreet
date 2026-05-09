@@ -1,4 +1,5 @@
-import { fetchQuote, fetchDailyCandles } from "@/lib/finnhubClient";
+import { fetchQuote } from "@/lib/finnhubClient";
+import { fetchYahooCandles } from "@/lib/yahooFinanceClient";
 
 export interface CurrentQuote {
   ticker: string;
@@ -37,11 +38,11 @@ export async function getHistoricalCloses(
   ticker: string,
   days = 60
 ): Promise<HistoricalData> {
-  const candles = await fetchDailyCandles(ticker, days);
+  const candles = await fetchYahooCandles(ticker, days);
 
   // Invertimos para que el índice 0 sea el más reciente (requerido por TechnicalAnalysisService)
-  const closes = [...candles.c].reverse().slice(0, days);
-  const dates = [...candles.t]
+  const closes = [...candles.closes].reverse().slice(0, days);
+  const dates = [...candles.timestamps]
     .reverse()
     .slice(0, days)
     .map((t) => new Date(t * 1000).toISOString().slice(0, 10));
