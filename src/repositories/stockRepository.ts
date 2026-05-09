@@ -1,11 +1,41 @@
 import { prisma } from "@/lib/prisma";
-import type { Stock } from "@prisma/client";
+import type { StockWithAnalysis } from "@/types/models";
 
-export async function getStocksByUser(userId: string): Promise<Stock[]> {
+export type { StockWithAnalysis };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PrismaStock = { id: string; ticker: string; userId: string; createdAt: Date };
+
+export async function getStocksByUser(userId: string): Promise<PrismaStock[]> {
   return prisma.stock.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
   });
+}
+
+export async function getStocksWithAnalysis(
+  userId: string
+): Promise<StockWithAnalysis[]> {
+  const stocks = await prisma.stock.findMany({
+    where: { userId },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (stocks.length === 0) return [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const analysisClient = (prisma as any).stockAnalysis;
+  const analyses: Array<{ stockId: string } & Record<string, unknown>> =
+    await analysisClient.findMany({
+      where: { stockId: { in: stocks.map((s) => s.id) } },
+    });
+
+  const analysisMap = new Map(analyses.map((a) => [a.stockId, a]));
+
+  return stocks.map((s) => ({
+    ...s,
+    analysis: (analysisMap.get(s.id) as unknown as StockWithAnalysis["analysis"]) ?? null,
+  }));
 }
 
 export async function countStocksByUser(userId: string): Promise<number> {
@@ -15,23 +45,17 @@ export async function countStocksByUser(userId: string): Promise<number> {
 export async function findStockByTickerAndUser(
   ticker: string,
   userId: string
-): Promise<Stock | null> {
+): Promise<PrismaStock | null> {
   return prisma.stock.findUnique({
     where: { ticker_userId: { ticker, userId } },
   });
 }
 
-export async function addStock(
-  ticker: string,
-  userId: string
-): Promise<Stock> {
+export async function addStock(ticker: string, userId: string): Promise<PrismaStock> {
   return prisma.stock.create({ data: { ticker, userId } });
 }
 
-export async function removeStock(
-  ticker: string,
-  userId: string
-): Promise<void> {
+export async function removeStock(ticker: string, userId: string): Promise<void> {
   await prisma.stock.delete({
     where: { ticker_userId: { ticker, userId } },
   });

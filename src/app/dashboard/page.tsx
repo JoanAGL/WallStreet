@@ -1,0 +1,66 @@
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { getStocksWithAnalysis } from "@/repositories/stockRepository";
+import StockCard from "@/components/dashboard/StockCard";
+import AddStockForm from "@/components/dashboard/AddStockForm";
+import UpdateButton from "@/components/dashboard/UpdateButton";
+import Disclaimer from "@/components/ui/Disclaimer";
+
+export const dynamic = "force-dynamic";
+
+export default async function DashboardPage() {
+  const session = await getServerSession(authOptions);
+  if (!session) redirect("/login");
+
+  const stocks = await getStocksWithAnalysis(session.user.id);
+
+  // Timestamp de la última actualización (el análisis más reciente)
+  const lastUpdatedAt = stocks
+    .map((s) => s.analysis?.updatedAt)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())[0]
+    ?.toISOString() ?? null;
+
+  return (
+    <div className="space-y-6">
+      {/* Disclaimer legal — siempre visible, no ocultable */}
+      <Disclaimer />
+
+      {/* Barra de acciones */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Mis acciones</h1>
+          <p className="text-sm text-gray-500">
+            {stocks.length} / 5 acciones añadidas
+          </p>
+        </div>
+        <UpdateButton lastUpdatedAt={lastUpdatedAt} />
+      </div>
+
+      {/* Formulario añadir acción */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4">
+        <p className="text-sm font-medium text-gray-700 mb-3">
+          Añadir acción (NYSE / NASDAQ)
+        </p>
+        <AddStockForm currentCount={stocks.length} />
+      </div>
+
+      {/* Lista de acciones */}
+      {stocks.length === 0 ? (
+        <div className="text-center py-16 text-gray-400">
+          <p className="text-4xl mb-3">📈</p>
+          <p className="text-sm">
+            No tienes acciones añadidas. Añade hasta 5 para ver el análisis.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
+          {stocks.map((stock) => (
+            <StockCard key={stock.id} stock={stock} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

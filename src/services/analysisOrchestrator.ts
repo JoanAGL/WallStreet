@@ -3,14 +3,14 @@ import { calculateIndicators } from "./technicalAnalysisService";
 import { analyzeNewsForTicker } from "./newsAnalysisService";
 import { generateStockAnalysis } from "./aiAnalysisService";
 import { upsertAnalysis } from "@/repositories/analysisRepository";
-import type { StockAnalysis } from "@prisma/client";
+import type { StockAnalysisModel } from "@/types/models";
 
 export interface OrchestrationResult {
   ticker: string;
   stockId: string;
   success: boolean;
   error?: string;
-  analysis?: StockAnalysis;
+  analysis?: StockAnalysisModel;
 }
 
 /**

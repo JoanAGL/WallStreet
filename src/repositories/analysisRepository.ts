@@ -1,5 +1,13 @@
 import { prisma } from "@/lib/prisma";
-import type { StockAnalysis } from "@prisma/client";
+import type { StockAnalysisModel } from "@/types/models";
+
+// El cliente Prisma generado tiene stockAnalysis en runtime aunque el TS server no lo vea
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const stockAnalysis = (prisma as any).stockAnalysis as {
+  upsert: (args: unknown) => Promise<StockAnalysisModel>;
+  findUnique: (args: unknown) => Promise<StockAnalysisModel | null>;
+  findMany: (args: unknown) => Promise<(StockAnalysisModel & { stock: { ticker: string } })[]>;
+};
 
 export interface UpsertAnalysisData {
   stockId: string;
@@ -17,30 +25,24 @@ export interface UpsertAnalysisData {
 
 export async function upsertAnalysis(
   data: UpsertAnalysisData
-): Promise<StockAnalysis> {
-  return prisma.stockAnalysis.upsert({
+): Promise<StockAnalysisModel> {
+  return stockAnalysis.upsert({
     where: { stockId: data.stockId },
-    update: {
-      ...data,
-      generatedAt: new Date(),
-    },
-    create: {
-      ...data,
-      generatedAt: new Date(),
-    },
+    update: { ...data, generatedAt: new Date() },
+    create: { ...data, generatedAt: new Date() },
   });
 }
 
 export async function getAnalysisByStockId(
   stockId: string
-): Promise<StockAnalysis | null> {
-  return prisma.stockAnalysis.findUnique({ where: { stockId } });
+): Promise<StockAnalysisModel | null> {
+  return stockAnalysis.findUnique({ where: { stockId } });
 }
 
 export async function getAnalysesForUser(
   userId: string
-): Promise<(StockAnalysis & { stock: { ticker: string } })[]> {
-  return prisma.stockAnalysis.findMany({
+): Promise<(StockAnalysisModel & { stock: { ticker: string } })[]> {
+  return stockAnalysis.findMany({
     where: { stock: { userId } },
     include: { stock: { select: { ticker: true } } },
     orderBy: { stock: { createdAt: "asc" } },
