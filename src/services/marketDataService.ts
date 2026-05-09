@@ -1,4 +1,4 @@
-import { fetchLatestBar, fetchDailyBars } from "@/lib/alpacaClient";
+import { fetchDailyBars } from "@/lib/alpacaClient";
 
 export interface CurrentQuote {
   ticker: string;
