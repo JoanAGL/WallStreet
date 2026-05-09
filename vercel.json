@@ -3,5 +3,11 @@
   "buildCommand": "npm run build",
   "devCommand": "npm run dev",
   "installCommand": "npm install",
-  "nodeVersion": "20.x"
+  "nodeVersion": "20.x",
+  "crons": [
+    {
+      "path": "/api/cron/daily-update",
+      "schedule": "0 8 * * 1-5"
+    }
+  ]
 }

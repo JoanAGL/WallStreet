@@ -1,0 +1,47 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { runAnalysisForStocks } from "@/services/analysisOrchestrator";
+
+// Vercel envía el CRON_SECRET como Bearer token en cada invocación
+function isAuthorized(req: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const auth = req.headers.get("authorization");
+  return auth === `Bearer ${secret}`;
+}
+
+export async function GET(req: NextRequest) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  try {
+    // Obtiene todas las acciones activas de todos los usuarios
+    const stocks = await prisma.stock.findMany({
+      select: { id: true, ticker: true },
+    });
+
+    if (stocks.length === 0) {
+      return NextResponse.json({ message: "Sin acciones que procesar", processed: 0 });
+    }
+
+    const results = await runAnalysisForStocks(stocks);
+
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success);
+
+    return NextResponse.json({
+      message: "Actualización diaria completada",
+      processed: stocks.length,
+      succeeded,
+      failed: failed.map((f) => ({ ticker: f.ticker, error: f.error })),
+      completedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("[CRON] Error en actualización diaria:", error);
+    return NextResponse.json(
+      { error: "Error interno en el cron job" },
+      { status: 500 }
+    );
+  }
+}
