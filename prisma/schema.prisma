@@ -25,5 +25,30 @@ model Stock {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 
+  analysis  StockAnalysis?
+
   @@unique([ticker, userId])
+}
+
+model StockAnalysis {
+  id                    String   @id @default(cuid())
+  stockId               String   @unique
+  stock                 Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  price                 Float
+  changePercent         Float
+
+  sma20                 Float?
+  sma50                 Float?
+  rsi14                 Float?
+
+  newsSummary           String
+  newsSentiment         String
+
+  analysisText          String
+  scenarioLabel         String
+  scenarioJustification String
+
+  generatedAt           DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
