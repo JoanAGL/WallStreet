@@ -1,5 +1,5 @@
 import { fetchNewsForTicker, type RawNewsArticle } from "@/lib/newsApiClient";
-import { chatCompletion } from "@/lib/openaiClient";
+import { geminiChat } from "@/lib/geminiClient";
 
 export type Sentiment = "Positivo" | "Neutral" | "Negativo";
 
@@ -68,11 +68,7 @@ export async function analyzeNewsForTicker(
   }
 
   const prompt = buildPrompt(ticker, articles);
-  const raw = await chatCompletion(
-    [{ role: "user", content: prompt }],
-    "gpt-4o-mini",
-    400
-  );
+  const raw = await geminiChat(prompt, 400);
 
   let summary = "No disponible";
   let sentiment: Sentiment = "Neutral";

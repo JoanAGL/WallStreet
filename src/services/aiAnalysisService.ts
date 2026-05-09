@@ -1,4 +1,4 @@
-import { chatCompletion } from "@/lib/openaiClient";
+import { geminiChat } from "@/lib/geminiClient";
 import type { TechnicalIndicators } from "./technicalAnalysisService";
 import type { NewsAnalysis, Sentiment } from "./newsAnalysisService";
 
@@ -66,11 +66,7 @@ export async function generateStockAnalysis(
     newsAnalysis.sentiment
   );
 
-  const raw = await chatCompletion(
-    [{ role: "user", content: prompt }],
-    "gpt-4o-mini",
-    600
-  );
+  const raw = await geminiChat(prompt, 600);
 
   let analysisText =
     "Análisis no disponible en este momento. Intenta actualizar más tarde.";
