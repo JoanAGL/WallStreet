@@ -5,6 +5,7 @@ import { calculateRiskLevel } from "@/lib/riskCalculator";
 import RiskBadge from "@/components/ui/RiskBadge";
 import RemoveStockButton from "./RemoveStockButton";
 import HorizonSelector from "./HorizonSelector";
+import Link from "next/link";
 
 interface Props {
   stock: StockWithAnalysis;
@@ -264,10 +265,18 @@ export default function StockCard({ stock }: Props) {
             </div>
           )}
 
-          {/* Timestamp */}
-          <p className="text-xs text-gray-400 text-right">
-            Actualizado: {new Date(a.updatedAt).toLocaleString("es-ES")}
-          </p>
+          {/* Footer: timestamp + enlace historial */}
+          <div className="flex items-center justify-between">
+            <Link
+              href={`/dashboard/${stock.ticker}`}
+              className="text-xs text-blue-500 hover:text-blue-700 hover:underline"
+            >
+              Ver historial →
+            </Link>
+            <p className="text-xs text-gray-400">
+              Actualizado: {new Date(a.updatedAt).toLocaleString("es-ES")}
+            </p>
+          </div>
         </>
       )}
     </div>

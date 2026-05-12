@@ -34,6 +34,7 @@ model Stock {
   createdAt         DateTime @default(now())
 
   analysis  StockAnalysis?
+  history   StockAnalysisHistory[]
 
   @@unique([ticker, userId])
 }
@@ -64,4 +65,18 @@ model StockAnalysis {
 
   generatedAt           DateTime @default(now())
   updatedAt             DateTime @updatedAt
+}
+
+model StockAnalysisHistory {
+  id            String   @id @default(cuid())
+  stockId       String
+  stock         Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  snapshotAt    DateTime @default(now())
+  price         Float
+  changePercent Float
+  scenarioLabel String
+  horizonUsed   String
+  rsi14         Float?
+
+  @@index([stockId, snapshotAt(sort: Desc)])
 }

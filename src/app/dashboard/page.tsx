@@ -6,6 +6,7 @@ import StockCard from "@/components/dashboard/StockCard";
 import AddStockForm from "@/components/dashboard/AddStockForm";
 import UpdateButton from "@/components/dashboard/UpdateButton";
 import Disclaimer from "@/components/ui/Disclaimer";
+import PortfolioSummary from "@/components/dashboard/PortfolioSummary";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,9 @@ export default async function DashboardPage() {
         </div>
         <UpdateButton lastUpdatedAt={lastUpdatedAt} />
       </div>
+
+      {/* Resumen de cartera */}
+      <PortfolioSummary stocks={stocks} />
 
       {/* Formulario añadir acción */}
       <div className="bg-white border border-gray-200 rounded-xl p-4">

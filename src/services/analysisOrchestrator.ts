@@ -7,6 +7,7 @@ import type { AllHorizonsAIAnalysis, HorizonAnalysis } from "./aiAnalysisService
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import type { AllFundamentals } from "@/lib/yahooFinanceClient";
 import { upsertAnalysis, getAnalysisByStockId } from "@/repositories/analysisRepository";
+import { insertSnapshot } from "@/repositories/analysisHistoryRepository";
 import type { StockAnalysisModel, InvestmentHorizon } from "@/types/models";
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
@@ -162,6 +163,16 @@ export async function runAnalysisForStocks(
           console.warn(`[ORCHESTRATOR] ${stock.ticker} - ${issue.kind} (${issue.source}): ${issue.message}`)
         );
       }
+
+      // Guardar snapshot en historial (no fatal)
+      insertSnapshot({
+        stockId:       stock.id,
+        price:         quote.price,
+        changePercent: quote.changePercent,
+        scenarioLabel: active.scenarioLabel,
+        horizonUsed:   horizon,
+        rsi14:         indicators.rsi14,
+      }).catch((e) => console.warn("[ORCHESTRATOR] History snapshot failed:", e));
 
       finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: true, analysis, dataIssues });
     } catch (err) {
