@@ -54,6 +54,7 @@ export async function runAnalysisForStock(
       analysisText: aiAnalysis.analysisText,
       scenarioLabel: aiAnalysis.scenario.label,
       scenarioJustification: aiAnalysis.scenario.justification,
+      divergenceAlert: aiAnalysis.divergenceAlert,
     });
 
     return { ticker, stockId, success: true, analysis };

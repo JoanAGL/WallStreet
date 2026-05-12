@@ -22,38 +22,50 @@ interface GeminiResponse {
   }>;
 }
 
+export interface GeminiChatOptions {
+  systemInstruction?: string;
+  jsonMode?: boolean;
+}
+
 export async function geminiChat(
   prompt: string,
   maxTokens = 600,
-  retries = 2
+  retries = 3,
+  options: GeminiChatOptions = {}
 ): Promise<string> {
   const url = `${BASE_URL}?key=${getApiKey()}`;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      const body: Record<string, unknown> = {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: maxTokens,
+          ...(options.jsonMode && { response_mime_type: "application/json" }),
+        },
+      };
+
+      if (options.systemInstruction) {
+        body.system_instruction = {
+          parts: [{ text: options.systemInstruction }],
+        };
+      }
+
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: maxTokens,
-          },
-        }),
+        body: JSON.stringify(body),
       });
 
-      // === ÉXITO ===
       if (res.ok) {
         const data = (await res.json()) as GeminiResponse;
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
         return text ?? "";
       }
 
-      // === ERROR ===
       const errorText = await res.text();
       let errorData: GeminiError | null = null;
-
       try {
         errorData = JSON.parse(errorText) as GeminiError;
       } catch {
@@ -63,21 +75,18 @@ export async function geminiChat(
       const status = res.status;
       const errorMessage = errorData?.error?.message || errorText;
 
-      // Manejo específico de errores comunes
       if (status === 429) {
-        const waitTime = (attempt + 1) * 2000; // 2s, 4s, 6s...
-        
+        const waitTime = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s, 8s...
         if (attempt < retries) {
-          console.warn(`[Gemini] Rate limit alcanzado. Reintentando en ${waitTime/1000}s... (intento ${attempt + 1}/${retries})`);
+          console.warn(`[Gemini] Rate limit. Reintentando en ${waitTime / 1000}s... (intento ${attempt + 1}/${retries})`);
           await new Promise(r => setTimeout(r, waitTime));
           continue;
-        } else {
-          throw new Error(`Gemini: Límite de uso gratuito excedido. Inténtalo más tarde. (${errorMessage})`);
         }
+        throw new Error(`Gemini: Límite de uso excedido. Inténtalo más tarde. (${errorMessage})`);
       }
 
       if (status === 404) {
-        throw new Error("Gemini: Modelo no encontrado. Verifica que el nombre del modelo sea correcto.");
+        throw new Error("Gemini: Modelo no encontrado. Verifica el nombre del modelo.");
       }
 
       if (status === 400) {
@@ -85,24 +94,25 @@ export async function geminiChat(
       }
 
       if (status >= 500) {
+        const waitTime = Math.pow(2, attempt) * 1000;
         if (attempt < retries) {
-          console.warn(`[Gemini] Error del servidor (${status}). Reintentando...`);
-          await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+          console.warn(`[Gemini] Error del servidor (${status}). Reintentando en ${waitTime / 1000}s...`);
+          await new Promise(r => setTimeout(r, waitTime));
           continue;
         }
       }
 
-      // Error genérico
       throw new Error(`Gemini error ${status}: ${errorMessage}`);
 
     } catch (error) {
       if (error instanceof Error && error.message.includes("Gemini")) {
-        throw error; // Re-lanzamos nuestros errores personalizados
+        throw error;
       }
 
       if (attempt < retries) {
-        console.warn(`[Gemini] Error de conexión. Reintentando... (intento ${attempt + 1})`);
-        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        const waitTime = Math.pow(2, attempt) * 1000;
+        console.warn(`[Gemini] Error de conexión. Reintentando en ${waitTime / 1000}s... (intento ${attempt + 1})`);
+        await new Promise(r => setTimeout(r, waitTime));
         continue;
       }
 

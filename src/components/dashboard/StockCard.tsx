@@ -76,6 +76,17 @@ export default function StockCard({ stock }: Props) {
             ))}
           </div>
 
+          {/* Alerta de divergencia */}
+          {a.divergenceAlert && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span className="mt-0.5 shrink-0">⚠</span>
+              <span>
+                <span className="font-semibold">Divergencia técnico-fundamental detectada.</span>{" "}
+                Los indicadores técnicos y el sentimiento noticioso apuntan en direcciones opuestas.
+              </span>
+            </div>
+          )}
+
           {/* Escenario */}
           <div className={`rounded-lg border px-3 py-2 text-sm ${sentimentClass}`}>
             <span className="font-semibold">

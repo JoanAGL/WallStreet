@@ -21,6 +21,7 @@ export interface UpsertAnalysisData {
   analysisText: string;
   scenarioLabel: string;
   scenarioJustification: string;
+  divergenceAlert: boolean;
 }
 
 export async function upsertAnalysis(

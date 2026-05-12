@@ -16,6 +16,7 @@ export interface StockAnalysisModel {
   analysisText: string;
   scenarioLabel: string;
   scenarioJustification: string;
+  divergenceAlert: boolean;
   generatedAt: Date;
   updatedAt: Date;
 }
