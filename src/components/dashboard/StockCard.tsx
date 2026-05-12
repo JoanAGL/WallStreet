@@ -13,14 +13,18 @@ const SENTIMENT_COLORS: Record<string, string> = {
   Negativo: "text-red-700 bg-red-50 border-red-200",
 };
 
+// Centinela que indica que el análisis IA no estaba disponible al actualizar
+const AI_UNAVAILABLE_JUSTIFICATION = "El análisis automático no está disponible en este momento.";
+
 function fmt(n: number | null, decimals = 2): string {
   return n !== null ? n.toFixed(decimals) : "—";
 }
 
 export default function StockCard({ stock }: Props) {
   const a = stock.analysis;
+  const isPartialAnalysis = a?.scenarioJustification === AI_UNAVAILABLE_JUSTIFICATION;
 
-  const riskLevel = a
+  const riskLevel = a && !isPartialAnalysis
     ? calculateRiskLevel(a.rsi14, a.scenarioLabel, a.newsSentiment)
     : null;
 
@@ -76,46 +80,57 @@ export default function StockCard({ stock }: Props) {
             ))}
           </div>
 
-          {/* Alerta de divergencia */}
-          {a.divergenceAlert && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              <span className="mt-0.5 shrink-0">⚠</span>
-              <span>
-                <span className="font-semibold">Divergencia técnico-fundamental detectada.</span>{" "}
-                Los indicadores técnicos y el sentimiento noticioso apuntan en direcciones opuestas.
-              </span>
+          {/* Banner análisis parcial (IA no disponible) */}
+          {isPartialAnalysis ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500 italic">
+              Análisis de IA no disponible temporalmente. Pulsa «Actualizar datos» cuando la cuota se haya recuperado.
             </div>
+          ) : (
+            <>
+              {/* Alerta de divergencia */}
+              {a.divergenceAlert && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  <span className="mt-0.5 shrink-0">⚠</span>
+                  <span>
+                    <span className="font-semibold">Divergencia técnico-fundamental detectada.</span>{" "}
+                    Los indicadores técnicos y el sentimiento noticioso apuntan en direcciones opuestas.
+                  </span>
+                </div>
+              )}
+
+              {/* Escenario */}
+              <div className={`rounded-lg border px-3 py-2 text-sm ${sentimentClass}`}>
+                <span className="font-semibold">
+                  Escenario {a.scenarioLabel} (5-7 días):
+                </span>{" "}
+                {a.scenarioJustification}
+              </div>
+
+              {/* Análisis IA */}
+              <p className="text-sm text-gray-700 leading-relaxed">{a.analysisText}</p>
+            </>
           )}
 
-          {/* Escenario */}
-          <div className={`rounded-lg border px-3 py-2 text-sm ${sentimentClass}`}>
-            <span className="font-semibold">
-              Escenario {a.scenarioLabel} (5-7 días):
-            </span>{" "}
-            {a.scenarioJustification}
-          </div>
-
-          {/* Análisis IA */}
-          <p className="text-sm text-gray-700 leading-relaxed">{a.analysisText}</p>
-
-          {/* Noticias */}
-          <div className="border-t border-gray-100 pt-3">
-            <p className="text-xs font-medium text-gray-500 mb-1">
-              Noticias recientes · Sentimiento:{" "}
-              <span
-                className={
-                  a.newsSentiment === "Positivo"
-                    ? "text-green-600"
-                    : a.newsSentiment === "Negativo"
-                    ? "text-red-600"
-                    : "text-yellow-600"
-                }
-              >
-                {a.newsSentiment}
-              </span>
-            </p>
-            <p className="text-xs text-gray-600 leading-relaxed">{a.newsSummary}</p>
-          </div>
+          {/* Noticias (siempre visible si hay resumen real) */}
+          {a.newsSummary !== "Resumen de noticias no disponible." && (
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-xs font-medium text-gray-500 mb-1">
+                Noticias recientes · Sentimiento:{" "}
+                <span
+                  className={
+                    a.newsSentiment === "Positivo"
+                      ? "text-green-600"
+                      : a.newsSentiment === "Negativo"
+                      ? "text-red-600"
+                      : "text-yellow-600"
+                  }
+                >
+                  {a.newsSentiment}
+                </span>
+              </p>
+              <p className="text-xs text-gray-600 leading-relaxed">{a.newsSummary}</p>
+            </div>
+          )}
 
           {/* Timestamp */}
           <p className="text-xs text-gray-400 text-right">

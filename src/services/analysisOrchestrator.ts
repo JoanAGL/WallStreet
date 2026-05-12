@@ -128,16 +128,19 @@ export async function runAnalysisForStocks(
 
   // ── Fases 3+4+5: Gemini secuencial por stock ─────────────────────────────
   // Procesar un stock a la vez para no saturar el rate-limit de Gemini.
-  // El fallo de un ticker queda aislado y no interrumpe a los siguientes.
+  // newsAnalysis se declara fuera del try para ser accesible en el catch:
+  // si Gemini falla en la fase AI, los datos de mercado + noticias obtenidos
+  // previamente se persisten igualmente con un texto de fallback.
   for (const { stock, quote, indicators } of withMarket) {
-    try {
-      const dataIssues: DataIssue[] = [];
+    let newsAnalysis: Awaited<ReturnType<typeof analyzeNewsForTicker>> | null = null;
+    const dataIssues: DataIssue[] = [];
 
-      // Fase 3: News analysis (Gemini)
-      const newsAnalysis = await analyzeNewsForTicker(stock.ticker);
+    try {
+      // Fase 3: News analysis (Gemini — no fatal si falla sentiment)
+      newsAnalysis = await analyzeNewsForTicker(stock.ticker);
       if (newsAnalysis.dataIssue) dataIssues.push(newsAnalysis.dataIssue);
 
-      // Fase 4: AI stock analysis (Gemini)
+      // Fase 4: AI stock analysis (Gemini — puede lanzar 429)
       const aiAnalysis = await generateStockAnalysis(
         stock.ticker,
         quote.price,
@@ -146,7 +149,7 @@ export async function runAnalysisForStocks(
         newsAnalysis
       );
 
-      // Fase 5: Persist
+      // Fase 5: Persist análisis completo
       const analysis = await upsertAnalysis({
         stockId: stock.id,
         price: quote.price,
@@ -171,8 +174,30 @@ export async function runAnalysisForStocks(
       finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: true, analysis, dataIssues });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[ORCHESTRATOR] ${stock.ticker}:`, msg);
-      finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg });
+      console.error(`[ORCHESTRATOR] ${stock.ticker} AI error: ${msg}`);
+
+      // Persiste siempre los datos de mercado (precio, indicadores) aunque
+      // Gemini haya fallado, para que el dashboard muestre información real.
+      try {
+        const analysis = await upsertAnalysis({
+          stockId: stock.id,
+          price: quote.price,
+          changePercent: quote.changePercent,
+          sma20: indicators.sma20,
+          sma50: indicators.sma50,
+          rsi14: indicators.rsi14,
+          newsSummary: newsAnalysis?.summary ?? "Resumen de noticias no disponible.",
+          newsSentiment: newsAnalysis?.sentiment ?? "Neutral",
+          analysisText: "Análisis de IA temporalmente no disponible. Los datos de mercado han sido actualizados.",
+          scenarioLabel: "Neutral",
+          scenarioJustification: "El análisis automático no está disponible en este momento.",
+          divergenceAlert: false,
+        });
+        dataIssues.push({ kind: "API_ERROR", source: "ai", message: msg });
+        finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg, analysis, dataIssues });
+      } catch (persistErr) {
+        finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg, dataIssues });
+      }
     }
   }
 
