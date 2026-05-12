@@ -3,6 +3,14 @@ import { geminiChat } from "@/lib/geminiClient";
 
 export type Sentiment = "Positivo" | "Neutral" | "Negativo";
 
+export type DataIssueKind = "NO_DATA" | "API_ERROR";
+
+export interface DataIssue {
+  kind: DataIssueKind;
+  source: "news" | "market" | "ai";
+  message: string;
+}
+
 export interface NewsArticle {
   title: string;
   description: string;
@@ -17,6 +25,7 @@ export interface NewsAnalysis {
   summary: string;
   sentiment: Sentiment;
   analyzedAt: string;
+  dataIssue?: DataIssue;
 }
 
 function normalizeArticle(raw: RawNewsArticle): NewsArticle {
@@ -51,19 +60,38 @@ Noticias:
 ${headlines}`;
 }
 
+// Esta función nunca lanza: clasifica el error y devuelve un resultado degradado.
 export async function analyzeNewsForTicker(
   ticker: string
 ): Promise<NewsAnalysis> {
-  const rawArticles = await fetchNewsForTicker(ticker, 48);
+  let rawArticles: RawNewsArticle[];
+
+  try {
+    rawArticles = await fetchNewsForTicker(ticker, 48);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[NewsAnalysis] API_ERROR for ${ticker}: ${message}`);
+    return {
+      ticker,
+      articles: [],
+      summary: "Error al obtener noticias del proveedor.",
+      sentiment: "Neutral",
+      analyzedAt: new Date().toISOString(),
+      dataIssue: { kind: "API_ERROR", source: "news", message },
+    };
+  }
+
   const articles = rawArticles.slice(0, 8).map(normalizeArticle);
 
   if (articles.length === 0) {
+    console.warn(`[NewsAnalysis] NO_DATA for ${ticker}: sin artículos en las últimas 48h`);
     return {
       ticker,
       articles: [],
       summary: "No se encontraron noticias recientes para este ticker.",
       sentiment: "Neutral",
       analyzedAt: new Date().toISOString(),
+      dataIssue: { kind: "NO_DATA", source: "news", message: "Sin artículos en las últimas 48h" },
     };
   }
 
