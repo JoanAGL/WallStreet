@@ -79,11 +79,14 @@ export async function updateStockPurchaseData(
   userId: string,
   data: { purchasePrice: number | null; quantity: number | null; purchaseDate: Date | null }
 ): Promise<PrismaStock> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return prisma.stock.update({
+  // Cast through unknown because the generated Prisma client predates these columns
+  const stockClient = prisma.stock as unknown as {
+    update: (args: { where: unknown; data: unknown }) => Promise<PrismaStock>;
+  };
+  return stockClient.update({
     where: { ticker_userId: { ticker, userId } },
-    data: data as any,
-  }) as unknown as PrismaStock;
+    data,
+  });
 }
 
 export async function removeStock(ticker: string, userId: string): Promise<void> {
