@@ -76,17 +76,13 @@ export async function geminiChat(
       const errorMessage = errorData?.error?.message || errorText;
 
       if (status === 429) {
-        if (attempt < retries) {
-          // Respeta el tiempo sugerido por Gemini ("Please retry in Xs.")
-          const retryMatch = errorMessage.match(/retry in (\d+(?:\.\d+)?)s/i);
-          const waitTime = retryMatch
-            ? Math.min(Math.ceil(parseFloat(retryMatch[1])) * 1000, 55_000)
-            : Math.pow(2, attempt) * 2000;
-          console.warn(`[Gemini] Rate limit. Reintentando en ${waitTime / 1000}s... (intento ${attempt + 1}/${retries})`);
-          await new Promise(r => setTimeout(r, waitTime));
-          continue;
-        }
-        throw new Error(`Gemini: Límite de uso excedido. Inténtalo más tarde. (${errorMessage})`);
+        // La cuota del tier gratuito está agotada. Reintentar en serverless
+        // no es viable: los tiempos de espera (50-60s) superan el timeout
+        // de la función. Fallamos inmediatamente para no bloquear el proceso.
+        const retryMatch = errorMessage.match(/retry in (\d+(?:\.\d+)?)s/i);
+        const retryInSecs = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) : null;
+        const hint = retryInSecs ? ` Inténtalo en ~${retryInSecs}s.` : "";
+        throw new Error(`Gemini: Cuota de solicitudes agotada.${hint}`);
       }
 
       if (status === 404) {

@@ -96,20 +96,23 @@ export async function analyzeNewsForTicker(
   }
 
   const prompt = buildPrompt(ticker, articles);
-  const raw = await geminiChat(prompt, 400);
 
   let summary = "No disponible";
   let sentiment: Sentiment = "Neutral";
+  let dataIssue: DataIssue | undefined;
 
   try {
+    const raw = await geminiChat(prompt, 400);
     const parsed = JSON.parse(raw) as { summary?: string; sentiment?: string };
     summary = parsed.summary ?? summary;
     const s = parsed.sentiment;
     if (s === "Positivo" || s === "Negativo" || s === "Neutral") {
       sentiment = s;
     }
-  } catch {
-    // Si el LLM no devuelve JSON válido, usamos los valores por defecto
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[NewsAnalysis] Gemini falló para ${ticker}, usando defaults: ${message}`);
+    dataIssue = { kind: "API_ERROR", source: "news", message };
   }
 
   return {
@@ -118,5 +121,6 @@ export async function analyzeNewsForTicker(
     summary,
     sentiment,
     analyzedAt: new Date().toISOString(),
+    dataIssue,
   };
 }
