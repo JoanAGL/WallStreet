@@ -1,7 +1,29 @@
 import type { InvestmentHorizon } from "@/types/models";
 
-const BASE_URL = "https://query2.finance.yahoo.com/v8/finance/chart";
+const BASE_URL    = "https://query2.finance.yahoo.com/v8/finance/chart";
 const SUMMARY_URL = "https://query2.finance.yahoo.com/v10/finance/quoteSummary";
+const YAHOO_UA    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+async function fetchYahooCrumb(): Promise<{ crumb: string; cookie: string } | null> {
+  try {
+    const consentRes = await fetch("https://fc.yahoo.com", {
+      headers: { "User-Agent": YAHOO_UA },
+      redirect: "follow",
+    });
+    const setCookie = consentRes.headers.get("set-cookie") ?? "";
+    const cookie = setCookie.split(",").map(c => c.split(";")[0].trim()).filter(Boolean).join("; ");
+
+    const crumbRes = await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb", {
+      headers: { "User-Agent": YAHOO_UA, "Cookie": cookie },
+    });
+    if (!crumbRes.ok) return null;
+    const crumb = (await crumbRes.text()).trim();
+    if (!crumb || crumb.length < 3 || crumb.startsWith("<")) return null;
+    return { crumb, cookie };
+  } catch {
+    return null;
+  }
+}
 
 interface YahooChartResult {
   timestamp: number[];
@@ -84,14 +106,19 @@ export async function fetchFundamentals(
   const url = `${SUMMARY_URL}/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,financialData,summaryDetail`;
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      next: { revalidate: 0 },
-    });
+    const auth = await fetchYahooCrumb();
+    const urlWithCrumb = auth
+      ? `${url}&crumb=${encodeURIComponent(auth.crumb)}`
+      : url;
+
+    const headers: Record<string, string> = {
+      "User-Agent": YAHOO_UA,
+      "Accept": "application/json",
+      "Accept-Language": "en-US,en;q=0.9",
+    };
+    if (auth?.cookie) headers["Cookie"] = auth.cookie;
+
+    const res = await fetch(urlWithCrumb, { headers, next: { revalidate: 0 } });
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");

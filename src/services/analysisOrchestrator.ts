@@ -205,12 +205,19 @@ function buildMetricsData(
   horizon: InvestmentHorizon,
   indicators: ReturnType<typeof calculateIndicators>,
   fundamentals: FundamentalMetrics | null
-): Record<string, number | null> {
-  if (horizon === "SHORT_TERM") {
-    return { atr14: indicators.atr14, relVolume: indicators.relVolume };
-  }
+): Record<string, number | null | string> {
+  // _horizon marks which horizon this analysis belongs to (used by UI to detect stale data)
+  const base: Record<string, number | null | string> = {
+    _horizon:  horizon,
+    atr14:     indicators.atr14,
+    relVolume: indicators.relVolume,
+  };
+
+  if (horizon === "SHORT_TERM") return base;
+
   if (horizon === "MEDIUM_TERM" && fundamentals?.horizon === "MEDIUM_TERM") {
     return {
+      ...base,
       revenueGrowthYoY: fundamentals.revenueGrowthYoY,
       forwardEps:       fundamentals.forwardEps,
       pegRatio:         fundamentals.pegRatio,
@@ -220,6 +227,7 @@ function buildMetricsData(
   }
   if (horizon === "LONG_TERM" && fundamentals?.horizon === "LONG_TERM") {
     return {
+      ...base,
       trailingPE:        fundamentals.trailingPE,
       dividendYield:     fundamentals.dividendYield,
       profitMargin:      fundamentals.profitMargin,
@@ -227,5 +235,5 @@ function buildMetricsData(
       beta:              fundamentals.beta,
     };
   }
-  return {};
+  return base;
 }

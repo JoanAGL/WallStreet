@@ -27,6 +27,18 @@ function fmtPct(n: number | null): string {
 
 type MetricEntry = { label: string; value: string };
 
+function getStoredHorizon(metricsData: string | null): InvestmentHorizon | null {
+  if (!metricsData) return null;
+  try {
+    const m = JSON.parse(metricsData) as Record<string, unknown>;
+    if (typeof m._horizon === "string") return m._horizon as InvestmentHorizon;
+    // Fallback inference for data stored before _horizon field was added
+    if ("trailingPE" in m) return "LONG_TERM";
+    if ("revenueGrowthYoY" in m) return "MEDIUM_TERM";
+    return "SHORT_TERM";
+  } catch { return null; }
+}
+
 function buildMetricsGrid(horizon: InvestmentHorizon, a: StockWithAnalysis["analysis"]): MetricEntry[] {
   if (!a) return [];
 
@@ -69,6 +81,9 @@ export default function StockCard({ stock }: Props) {
   const a = stock.analysis;
   const horizon = stock.investmentHorizon;
   const isPartialAnalysis = a?.scenarioJustification === AI_UNAVAILABLE_JUSTIFICATION;
+
+  const storedHorizon = getStoredHorizon(a?.metricsData ?? null);
+  const isStaleHorizon = !isPartialAnalysis && a !== null && storedHorizon !== null && storedHorizon !== horizon;
 
   const riskLevel = a && !isPartialAnalysis
     ? calculateRiskLevel(a.rsi14, a.scenarioLabel, a.newsSentiment)
@@ -133,6 +148,14 @@ export default function StockCard({ stock }: Props) {
             ))}
           </div>
 
+          {/* Banner horizonte obsoleto */}
+          {isStaleHorizon && (
+            <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+              Los datos guardados son de <span className="font-semibold">{HORIZON_LABELS[storedHorizon!]}</span>.
+              Pulsa «Actualizar datos» para analizar en <span className="font-semibold">{HORIZON_LABELS[horizon]}</span>.
+            </div>
+          )}
+
           {/* Banner análisis parcial */}
           {isPartialAnalysis ? (
             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500 italic">
@@ -162,16 +185,16 @@ export default function StockCard({ stock }: Props) {
               {/* Análisis IA */}
               <p className="text-sm text-gray-700 leading-relaxed">{a.analysisText}</p>
 
-              {/* Encaje con horizonte */}
-              {a.horizonMatch && (
+              {/* Encaje con horizonte — solo si el análisis es del horizonte actual */}
+              {!isStaleHorizon && a.horizonMatch && (
                 <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
                   <span className="font-semibold">Encaje con {HORIZON_LABELS[horizon]}:</span>{" "}
                   {a.horizonMatch}
                 </div>
               )}
 
-              {/* Key metrics chips */}
-              {keyMetrics.length > 0 && (
+              {/* Key metrics chips — solo si el análisis es del horizonte actual */}
+              {!isStaleHorizon && keyMetrics.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {keyMetrics.map((m) => (
                     <span
