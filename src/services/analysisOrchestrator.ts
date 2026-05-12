@@ -2,9 +2,10 @@ import { getCurrentQuote, getHistoricalCloses } from "./marketDataService";
 import { calculateIndicators } from "./technicalAnalysisService";
 import { analyzeNewsForTicker } from "./newsAnalysisService";
 import type { DataIssue } from "./newsAnalysisService";
-import { generateStockAnalysis } from "./aiAnalysisService";
+import { generateAllHorizonsAnalysis } from "./aiAnalysisService";
+import type { AllHorizonsAIAnalysis, HorizonAnalysis } from "./aiAnalysisService";
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
-import type { AllFundamentals, FundamentalMetrics } from "@/lib/yahooFinanceClient";
+import type { AllFundamentals } from "@/lib/yahooFinanceClient";
 import { upsertAnalysis, getAnalysisByStockId } from "@/repositories/analysisRepository";
 import type { StockAnalysisModel, InvestmentHorizon } from "@/types/models";
 
@@ -114,53 +115,46 @@ export async function runAnalysisForStocks(
 
   if (withMarket.length === 0) return finalResults;
 
-  // ── Fases 3+4+5: Gemini secuencial ───────────────────────────────────────
+  // ── Fases 3+4+5: Gemini secuencial (1 llamada por stock, 3 horizontes) ────
   for (const { stock, quote, indicators, allFundamentals } of withMarket) {
     const horizon: InvestmentHorizon = stock.investmentHorizon ?? "SHORT_TERM";
     let newsAnalysis: Awaited<ReturnType<typeof analyzeNewsForTicker>> | null = null;
     const dataIssues: DataIssue[] = [];
 
-    // Fundamentals ya disponibles desde la fase paralela — seleccionar los del horizonte activo para Gemini
-    const fundamentals: FundamentalMetrics | null =
-      horizon === "MEDIUM_TERM" ? { horizon: "MEDIUM_TERM", ...allFundamentals.medium } :
-      horizon === "LONG_TERM"   ? { horizon: "LONG_TERM",   ...allFundamentals.long }   :
-      null;
-
     try {
-      // Fase 3: News analysis (Gemini — no fatal)
+      // Fase 3: News (Gemini — no fatal)
       newsAnalysis = await analyzeNewsForTicker(stock.ticker);
       if (newsAnalysis.dataIssue) dataIssues.push(newsAnalysis.dataIssue);
 
-      // Fase 4: AI stock analysis (Gemini — con horizonte y fundamentals)
-      const aiAnalysis = await generateStockAnalysis(
-        stock.ticker,
-        quote.price,
-        quote.changePercent,
-        indicators,
-        newsAnalysis,
-        horizon,
-        fundamentals
+      // Fase 4: Análisis de los 3 horizontes en una sola llamada Gemini
+      const allAI = await generateAllHorizonsAnalysis(
+        stock.ticker, quote.price, quote.changePercent,
+        indicators, newsAnalysis, allFundamentals
       );
+
+      // Datos del horizonte activo para los campos individuales (compatibilidad)
+      const active = horizonToAI(allAI, horizon);
 
       // Fase 5: Persist
       const metricsData = buildMetricsData(horizon, indicators, allFundamentals);
 
       const analysis = await upsertAnalysis({
-        stockId:              stock.id,
-        price:                quote.price,
-        changePercent:        quote.changePercent,
-        sma20:                indicators.sma20,
-        sma50:                indicators.sma50,
-        rsi14:                indicators.rsi14,
-        newsSummary:          newsAnalysis.summary,
-        newsSentiment:        newsAnalysis.sentiment,
-        analysisText:         aiAnalysis.analysisText,
-        scenarioLabel:        aiAnalysis.scenario.label,
-        scenarioJustification: aiAnalysis.scenario.justification,
-        divergenceAlert:      aiAnalysis.divergenceAlert,
-        horizonMatch:         aiAnalysis.horizonMatch,
-        keyMetrics:           JSON.stringify(aiAnalysis.keyMetrics),
-        metricsData:          JSON.stringify(metricsData),
+        stockId:               stock.id,
+        price:                 quote.price,
+        changePercent:         quote.changePercent,
+        sma20:                 indicators.sma20,
+        sma50:                 indicators.sma50,
+        rsi14:                 indicators.rsi14,
+        newsSummary:           newsAnalysis.summary,
+        newsSentiment:         newsAnalysis.sentiment,
+        analysisText:          active.analysisText,
+        scenarioLabel:         active.scenarioLabel,
+        scenarioJustification: active.scenarioJustification,
+        divergenceAlert:       active.divergenceAlert,
+        horizonMatch:          active.horizonMatch,
+        keyMetrics:            JSON.stringify(active.keyMetrics),
+        metricsData:           JSON.stringify(metricsData),
+        allHorizons:           JSON.stringify(allAI),
       });
 
       if (dataIssues.length) {
@@ -174,24 +168,25 @@ export async function runAnalysisForStocks(
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[ORCHESTRATOR] ${stock.ticker} AI error: ${msg}`);
 
-      // Persiste siempre los datos de mercado aunque Gemini falle
+      // Persiste datos de mercado aunque Gemini falle
       try {
         const analysis = await upsertAnalysis({
-          stockId:              stock.id,
-          price:                quote.price,
-          changePercent:        quote.changePercent,
-          sma20:                indicators.sma20,
-          sma50:                indicators.sma50,
-          rsi14:                indicators.rsi14,
-          newsSummary:          newsAnalysis?.summary ?? "Resumen de noticias no disponible.",
-          newsSentiment:        newsAnalysis?.sentiment ?? "Neutral",
-          analysisText:         "Análisis de IA temporalmente no disponible. Los datos de mercado han sido actualizados.",
-          scenarioLabel:        "Neutral",
+          stockId:               stock.id,
+          price:                 quote.price,
+          changePercent:         quote.changePercent,
+          sma20:                 indicators.sma20,
+          sma50:                 indicators.sma50,
+          rsi14:                 indicators.rsi14,
+          newsSummary:           newsAnalysis?.summary ?? "Resumen de noticias no disponible.",
+          newsSentiment:         newsAnalysis?.sentiment ?? "Neutral",
+          analysisText:          "Análisis de IA temporalmente no disponible. Los datos de mercado han sido actualizados.",
+          scenarioLabel:         "Neutral",
           scenarioJustification: "El análisis automático no está disponible en este momento.",
-          divergenceAlert:      false,
-          horizonMatch:         null,
-          keyMetrics:           null,
-          metricsData:          null,
+          divergenceAlert:       false,
+          horizonMatch:          null,
+          keyMetrics:            null,
+          metricsData:           JSON.stringify(buildMetricsData(horizon, indicators, allFundamentals)),
+          allHorizons:           null,
         });
         dataIssues.push({ kind: "API_ERROR", source: "ai", message: msg });
         finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg, analysis, dataIssues });
@@ -202,6 +197,12 @@ export async function runAnalysisForStocks(
   }
 
   return finalResults;
+}
+
+function horizonToAI(all: AllHorizonsAIAnalysis, horizon: InvestmentHorizon): HorizonAnalysis {
+  if (horizon === "MEDIUM_TERM") return all.mediumTerm;
+  if (horizon === "LONG_TERM")   return all.longTerm;
+  return all.shortTerm;
 }
 
 function buildMetricsData(

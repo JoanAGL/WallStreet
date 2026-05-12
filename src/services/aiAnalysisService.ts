@@ -1,7 +1,7 @@
 import { geminiChat } from "@/lib/geminiClient";
 import type { TechnicalIndicators } from "./technicalAnalysisService";
 import type { NewsAnalysis, Sentiment } from "./newsAnalysisService";
-import type { FundamentalMetrics, MediumTermFundamentals, LongTermFundamentals } from "@/lib/yahooFinanceClient";
+import type { FundamentalMetrics, MediumTermFundamentals, LongTermFundamentals, AllFundamentals } from "@/lib/yahooFinanceClient";
 import type { InvestmentHorizon } from "@/types/models";
 
 export interface StockScenario {
@@ -211,4 +211,142 @@ export async function generateStockAnalysis(
     keyMetrics,
     generatedAt: new Date().toISOString(),
   };
+}
+
+// ── Multi-horizonte en una sola llamada ───────────────────────────────────────
+
+export interface HorizonAnalysis {
+  analysisText: string;
+  scenarioLabel: "Positivo" | "Neutral" | "Negativo";
+  scenarioJustification: string;
+  divergenceAlert: boolean;
+  horizonMatch: string;
+  keyMetrics: string[];
+}
+
+export interface AllHorizonsAIAnalysis {
+  shortTerm:  HorizonAnalysis;
+  mediumTerm: HorizonAnalysis;
+  longTerm:   HorizonAnalysis;
+}
+
+const FALLBACK_HORIZON: HorizonAnalysis = {
+  analysisText:         "Análisis no disponible en este momento.",
+  scenarioLabel:        "Neutral",
+  scenarioJustification:"Datos insuficientes para determinar el escenario.",
+  divergenceAlert:      false,
+  horizonMatch:         "",
+  keyMetrics:           [],
+};
+
+const SYSTEM_INSTRUCTION_ALL =
+  "Eres un analista financiero experto en tres estilos de inversión: " +
+  "(1) trading técnico de corto plazo, (2) análisis fundamental de medio plazo y " +
+  "(3) inversión en valor de largo plazo. " +
+  "Responde siempre en español y en formato JSON estricto. Sin recomendaciones de compra/venta.";
+
+function buildAllHorizonsPrompt(
+  ticker: string,
+  price: number,
+  changePercent: number,
+  indicators: TechnicalIndicators,
+  allFundamentals: AllFundamentals,
+  newsSummary: string,
+  newsSentiment: Sentiment
+): string {
+  const m = allFundamentals.medium;
+  const l = allFundamentals.long;
+
+  return `Analiza ${ticker} simultáneamente desde tres horizontes de inversión.
+Fecha: ${getTemporalContext()}.
+Precio: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
+Noticias (48h): ${newsSummary} | Sentimiento: ${newsSentiment}
+
+Indicadores técnicos (Corto Plazo): ${formatTechnicalBlock(indicators)}
+Métricas fundamentales (Medio Plazo): ${formatMediumBlock(m)}
+Métricas de valor (Largo Plazo): ${formatLongBlock(l)}
+
+Responde ÚNICAMENTE con este JSON (sin texto adicional):
+{
+  "shortTerm": {
+    "analysisText": "3-4 oraciones enfocadas en momentum técnico y volatilidad.",
+    "scenarioLabel": "Positivo|Neutral|Negativo",
+    "scenarioJustification": "Una oración para el corto plazo.",
+    "divergenceAlert": true|false,
+    "horizonMatch": "Por qué encaja o no para trading de corto plazo.",
+    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"]
+  },
+  "mediumTerm": {
+    "analysisText": "3-4 oraciones enfocadas en crecimiento operativo y eficiencia de capital.",
+    "scenarioLabel": "Positivo|Neutral|Negativo",
+    "scenarioJustification": "Una oración para el medio plazo.",
+    "divergenceAlert": true|false,
+    "horizonMatch": "Por qué encaja o no para inversión de medio plazo.",
+    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"]
+  },
+  "longTerm": {
+    "analysisText": "3-4 oraciones enfocadas en valor intrínseco, moat y generación de FCF.",
+    "scenarioLabel": "Positivo|Neutral|Negativo",
+    "scenarioJustification": "Una oración para el largo plazo.",
+    "divergenceAlert": true|false,
+    "horizonMatch": "Por qué encaja o no para inversión de largo plazo.",
+    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"]
+  }
+}
+
+divergenceAlert: true si técnicos y sentimiento noticioso apuntan en direcciones opuestas.
+keyMetrics: las 3 métricas del bloque correspondiente que más influyen en ese horizonte.
+REGLAS: Sin recomendaciones. Sin proyecciones de precio. Solo análisis informativo.`;
+}
+
+function parseHorizonBlock(raw: Record<string, unknown> | undefined): HorizonAnalysis {
+  if (!raw) return FALLBACK_HORIZON;
+  const label = raw.scenarioLabel;
+  return {
+    analysisText:         typeof raw.analysisText === "string" && raw.analysisText.trim()
+                            ? raw.analysisText : FALLBACK_HORIZON.analysisText,
+    scenarioLabel:        label === "Positivo" || label === "Negativo" || label === "Neutral"
+                            ? label : "Neutral",
+    scenarioJustification: typeof raw.scenarioJustification === "string" && raw.scenarioJustification.trim()
+                            ? raw.scenarioJustification : FALLBACK_HORIZON.scenarioJustification,
+    divergenceAlert:      typeof raw.divergenceAlert === "boolean" ? raw.divergenceAlert : false,
+    horizonMatch:         typeof raw.horizonMatch === "string" ? raw.horizonMatch : "",
+    keyMetrics:           Array.isArray(raw.keyMetrics)
+                            ? raw.keyMetrics.filter((k): k is string => typeof k === "string")
+                            : [],
+  };
+}
+
+export async function generateAllHorizonsAnalysis(
+  ticker: string,
+  price: number,
+  changePercent: number,
+  indicators: TechnicalIndicators,
+  newsAnalysis: NewsAnalysis,
+  allFundamentals: AllFundamentals
+): Promise<AllHorizonsAIAnalysis> {
+  const prompt = buildAllHorizonsPrompt(
+    ticker, price, changePercent, indicators,
+    allFundamentals, newsAnalysis.summary, newsAnalysis.sentiment
+  );
+
+  const raw = await geminiChat(prompt, 2000, 3, {
+    systemInstruction: SYSTEM_INSTRUCTION_ALL,
+    jsonMode: true,
+  });
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      shortTerm?:  Record<string, unknown>;
+      mediumTerm?: Record<string, unknown>;
+      longTerm?:   Record<string, unknown>;
+    };
+    return {
+      shortTerm:  parseHorizonBlock(parsed.shortTerm),
+      mediumTerm: parseHorizonBlock(parsed.mediumTerm),
+      longTerm:   parseHorizonBlock(parsed.longTerm),
+    };
+  } catch {
+    return { shortTerm: FALLBACK_HORIZON, mediumTerm: FALLBACK_HORIZON, longTerm: FALLBACK_HORIZON };
+  }
 }

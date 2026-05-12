@@ -1,0 +1,1 @@
+ALTER TABLE "StockAnalysis" ADD COLUMN IF NOT EXISTS "allHorizons" TEXT;

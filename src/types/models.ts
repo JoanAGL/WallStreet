@@ -28,6 +28,7 @@ export interface StockAnalysisModel {
   horizonMatch: string | null;
   keyMetrics: string | null;   // JSON string[]
   metricsData: string | null;  // JSON object with horizon-specific metrics
+  allHorizons: string | null;  // JSON AllHorizonsAIAnalysis — analysis for all 3 horizons
   generatedAt: Date;
   updatedAt: Date;
 }

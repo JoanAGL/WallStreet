@@ -1,5 +1,6 @@
 import type { StockWithAnalysis, InvestmentHorizon } from "@/types/models";
 import { HORIZON_LABELS } from "@/types/models";
+import type { HorizonAnalysis, AllHorizonsAIAnalysis } from "@/services/aiAnalysisService";
 import { calculateRiskLevel } from "@/lib/riskCalculator";
 import RiskBadge from "@/components/ui/RiskBadge";
 import RemoveStockButton from "./RemoveStockButton";
@@ -27,12 +28,22 @@ function fmtPct(n: number | null): string {
 
 type MetricEntry = { label: string; value: string };
 
+function parseAllHorizons(raw: string | null): AllHorizonsAIAnalysis | null {
+  if (!raw) return null;
+  try { return JSON.parse(raw) as AllHorizonsAIAnalysis; } catch { return null; }
+}
+
+function getHorizonAI(all: AllHorizonsAIAnalysis, horizon: InvestmentHorizon): HorizonAnalysis {
+  if (horizon === "MEDIUM_TERM") return all.mediumTerm;
+  if (horizon === "LONG_TERM")   return all.longTerm;
+  return all.shortTerm;
+}
+
 function getStoredHorizon(metricsData: string | null): InvestmentHorizon | null {
   if (!metricsData) return null;
   try {
     const m = JSON.parse(metricsData) as Record<string, unknown>;
     if (typeof m._horizon === "string") return m._horizon as InvestmentHorizon;
-    // Fallback inference for data stored before _horizon field was added
     if ("trailingPE" in m) return "LONG_TERM";
     if ("revenueGrowthYoY" in m) return "MEDIUM_TERM";
     return "SHORT_TERM";
@@ -97,22 +108,32 @@ export default function StockCard({ stock }: Props) {
   const horizon = stock.investmentHorizon;
   const isPartialAnalysis = a?.scenarioJustification === AI_UNAVAILABLE_JUSTIFICATION;
 
+  // Multi-horizon AI: use allHorizons when available, fall back to individual fields
+  const allHorizonsData = parseAllHorizons(a?.allHorizons ?? null);
+  const horizonAI = allHorizonsData ? getHorizonAI(allHorizonsData, horizon) : null;
+
+  // Only show stale banner when allHorizons is not available (old records)
   const storedHorizon = getStoredHorizon(a?.metricsData ?? null);
-  const isStaleHorizon = !isPartialAnalysis && a !== null && storedHorizon !== null && storedHorizon !== horizon;
+  const isStaleHorizon = !allHorizonsData && !isPartialAnalysis && a !== null
+    && storedHorizon !== null && storedHorizon !== horizon;
+
+  // Resolve display values: prefer horizonAI, else fall back to DB fields
+  const displayScenarioLabel    = (horizonAI?.scenarioLabel    ?? a?.scenarioLabel    ?? "Neutral") as "Positivo" | "Neutral" | "Negativo";
+  const displayScenarioJust     = horizonAI?.scenarioJustification ?? a?.scenarioJustification ?? "";
+  const displayAnalysisText     = horizonAI?.analysisText          ?? a?.analysisText          ?? "";
+  const displayDivergenceAlert  = horizonAI?.divergenceAlert       ?? a?.divergenceAlert       ?? false;
+  const displayHorizonMatch     = horizonAI?.horizonMatch          ?? a?.horizonMatch          ?? "";
+  const displayKeyMetrics: string[] = horizonAI?.keyMetrics
+    ?? (() => { try { return a?.keyMetrics ? JSON.parse(a.keyMetrics) as string[] : []; } catch { return []; } })();
 
   const riskLevel = a && !isPartialAnalysis
-    ? calculateRiskLevel(a.rsi14, a.scenarioLabel, a.newsSentiment)
+    ? calculateRiskLevel(a.rsi14, displayScenarioLabel, a.newsSentiment)
     : null;
 
   const changeColor = a && a.changePercent >= 0 ? "text-green-600" : "text-red-600";
-  const sentimentClass = a ? (SENTIMENT_COLORS[a.scenarioLabel] ?? SENTIMENT_COLORS["Neutral"]) : "";
+  const sentimentClass = SENTIMENT_COLORS[displayScenarioLabel] ?? SENTIMENT_COLORS["Neutral"];
 
   const metricsGrid = buildMetricsGrid(horizon, a);
-
-  let keyMetrics: string[] = [];
-  if (a?.keyMetrics && !isPartialAnalysis) {
-    try { keyMetrics = JSON.parse(a.keyMetrics); } catch { /* ignore */ }
-  }
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
@@ -163,7 +184,7 @@ export default function StockCard({ stock }: Props) {
             ))}
           </div>
 
-          {/* Banner horizonte obsoleto */}
+          {/* Banner horizonte obsoleto (solo para registros sin allHorizons) */}
           {isStaleHorizon && (
             <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
               Los datos guardados son de <span className="font-semibold">{HORIZON_LABELS[storedHorizon!]}</span>.
@@ -179,7 +200,7 @@ export default function StockCard({ stock }: Props) {
           ) : (
             <>
               {/* Alerta de divergencia */}
-              {a.divergenceAlert && (
+              {displayDivergenceAlert && (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   <span className="mt-0.5 shrink-0">⚠</span>
                   <span>
@@ -191,27 +212,25 @@ export default function StockCard({ stock }: Props) {
 
               {/* Escenario */}
               <div className={`rounded-lg border px-3 py-2 text-sm ${sentimentClass}`}>
-                <span className="font-semibold">
-                  Escenario {a.scenarioLabel}:
-                </span>{" "}
-                {a.scenarioJustification}
+                <span className="font-semibold">Escenario {displayScenarioLabel}:</span>{" "}
+                {displayScenarioJust}
               </div>
 
               {/* Análisis IA */}
-              <p className="text-sm text-gray-700 leading-relaxed">{a.analysisText}</p>
+              <p className="text-sm text-gray-700 leading-relaxed">{displayAnalysisText}</p>
 
-              {/* Encaje con horizonte — solo si el análisis es del horizonte actual */}
-              {!isStaleHorizon && a.horizonMatch && (
+              {/* Encaje con horizonte */}
+              {displayHorizonMatch && (
                 <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
                   <span className="font-semibold">Encaje con {HORIZON_LABELS[horizon]}:</span>{" "}
-                  {a.horizonMatch}
+                  {displayHorizonMatch}
                 </div>
               )}
 
-              {/* Key metrics chips — solo si el análisis es del horizonte actual */}
-              {!isStaleHorizon && keyMetrics.length > 0 && (
+              {/* Key metrics chips */}
+              {displayKeyMetrics.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {keyMetrics.map((m) => (
+                  {displayKeyMetrics.map((m) => (
                     <span
                       key={m}
                       className="inline-block rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-600"

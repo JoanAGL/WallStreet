@@ -24,6 +24,7 @@ export interface UpsertAnalysisData {
   horizonMatch: string | null;
   keyMetrics: string | null;
   metricsData: string | null;
+  allHorizons: string | null;
 }
 
 export async function upsertAnalysis(

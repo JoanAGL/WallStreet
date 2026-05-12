@@ -60,6 +60,7 @@ model StockAnalysis {
   horizonMatch          String?
   keyMetrics            String?
   metricsData           String?
+  allHorizons           String?
 
   generatedAt           DateTime @default(now())
   updatedAt             DateTime @updatedAt
