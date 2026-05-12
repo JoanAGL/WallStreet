@@ -3,14 +3,22 @@ import type { InvestmentHorizon, StockWithAnalysis } from "@/types/models";
 
 export type { StockWithAnalysis };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaStock = { id: string; ticker: string; userId: string; investmentHorizon: InvestmentHorizon; createdAt: Date };
+export type PrismaStock = {
+  id: string;
+  ticker: string;
+  userId: string;
+  investmentHorizon: InvestmentHorizon;
+  purchasePrice: number | null;
+  purchaseDate: Date | null;
+  quantity: number | null;
+  createdAt: Date;
+};
 
 export async function getStocksByUser(userId: string): Promise<PrismaStock[]> {
   return prisma.stock.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
-  });
+  }) as unknown as PrismaStock[];
 }
 
 export async function getStocksWithAnalysis(
@@ -19,7 +27,7 @@ export async function getStocksWithAnalysis(
   const stocks = await prisma.stock.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },
-  });
+  }) as unknown as PrismaStock[];
 
   if (stocks.length === 0) return [];
 
@@ -48,11 +56,11 @@ export async function findStockByTickerAndUser(
 ): Promise<PrismaStock | null> {
   return prisma.stock.findUnique({
     where: { ticker_userId: { ticker, userId } },
-  });
+  }) as unknown as PrismaStock | null;
 }
 
 export async function addStock(ticker: string, userId: string): Promise<PrismaStock> {
-  return prisma.stock.create({ data: { ticker, userId } });
+  return prisma.stock.create({ data: { ticker, userId } }) as unknown as PrismaStock;
 }
 
 export async function updateStockHorizon(
@@ -63,7 +71,19 @@ export async function updateStockHorizon(
   return prisma.stock.update({
     where: { ticker_userId: { ticker, userId } },
     data: { investmentHorizon },
-  });
+  }) as unknown as PrismaStock;
+}
+
+export async function updateStockPurchaseData(
+  ticker: string,
+  userId: string,
+  data: { purchasePrice: number | null; quantity: number | null; purchaseDate: Date | null }
+): Promise<PrismaStock> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return prisma.stock.update({
+    where: { ticker_userId: { ticker, userId } },
+    data: data as any,
+  }) as unknown as PrismaStock;
 }
 
 export async function removeStock(ticker: string, userId: string): Promise<void> {

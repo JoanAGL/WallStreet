@@ -38,6 +38,9 @@ export interface StockModel {
   ticker: string;
   userId: string;
   investmentHorizon: InvestmentHorizon;
+  purchasePrice: number | null;
+  purchaseDate: Date | null;
+  quantity: number | null;
   createdAt: Date;
 }
 

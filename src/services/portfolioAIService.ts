@@ -12,6 +12,13 @@ export interface PortfolioStockInput {
   divergenceAlert: boolean;
   newsSentiment: string;
   keyMetrics: string[];
+  // Optional position data
+  purchasePrice?: number | null;
+  quantity?: number | null;
+  costBasis?: number | null;
+  currentValue?: number | null;
+  pnl?: number | null;
+  pnlPct?: number | null;
 }
 
 export interface PortfolioAIAnalysis {
@@ -49,16 +56,29 @@ export async function generatePortfolioAnalysis(
 ): Promise<PortfolioAIAnalysis> {
   if (stocks.length < 2) return FALLBACK;
 
+  const fmtMoney = (n: number) =>
+    n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
+
   const stocksBlock = stocks
-    .map((s) =>
-      `• ${s.ticker} | $${s.price.toFixed(2)} (${s.changePercent >= 0 ? "+" : ""}${s.changePercent.toFixed(2)}% hoy) | Horizonte: ${HORIZON_LABELS[s.investmentHorizon]}\n` +
-      `  Escenario: ${s.scenarioLabel} — ${s.scenarioJustification}\n` +
-      `  Sentimiento noticias: ${s.newsSentiment} | Divergencia técnico-fundamental: ${s.divergenceAlert ? "Sí ⚠" : "No"}\n` +
-      `  Métricas clave: ${s.keyMetrics.join(", ") || "N/D"}`
-    )
+    .map((s) => {
+      const positionLine =
+        s.costBasis != null && s.currentValue != null && s.pnl != null && s.pnlPct != null
+          ? `  Posición: ${s.quantity} acciones | Comprado a ${fmtMoney(s.purchasePrice!)} | Invertido: ${fmtMoney(s.costBasis)} | Valor actual: ${fmtMoney(s.currentValue)} | P&L: ${s.pnl >= 0 ? "+" : ""}${fmtMoney(s.pnl)} (${s.pnlPct >= 0 ? "+" : ""}${s.pnlPct.toFixed(2)}%)`
+          : null;
+
+      return (
+        `• ${s.ticker} | $${s.price.toFixed(2)} (${s.changePercent >= 0 ? "+" : ""}${s.changePercent.toFixed(2)}% hoy) | Horizonte: ${HORIZON_LABELS[s.investmentHorizon]}\n` +
+        `  Escenario: ${s.scenarioLabel} — ${s.scenarioJustification}\n` +
+        `  Sentimiento noticias: ${s.newsSentiment} | Divergencia técnico-fundamental: ${s.divergenceAlert ? "Sí ⚠" : "No"}\n` +
+        `  Métricas clave: ${s.keyMetrics.join(", ") || "N/D"}` +
+        (positionLine ? `\n${positionLine}` : "")
+      );
+    })
     .join("\n\n");
 
-  const prompt = `Analiza el siguiente portfolio de ${stocks.length} acciones como un conjunto. No analices cada acción de forma individual — evalúa la cartera de forma global.
+  const hasPositionData = stocks.some((s) => s.costBasis != null);
+
+  const prompt = `Analiza el siguiente portfolio de ${stocks.length} acciones como un conjunto. No analices cada acción de forma individual — evalúa la cartera de forma global.${hasPositionData ? " Cuando estén disponibles, usa los datos de posición (coste, P&L) para contextualizar el análisis." : ""}
 
 PORTFOLIO:
 ${stocksBlock}

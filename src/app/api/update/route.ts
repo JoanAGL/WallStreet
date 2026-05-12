@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getStocksByUser } from "@/repositories/stockRepository";
+import { getStocksByUser, type PrismaStock } from "@/repositories/stockRepository";
 import { getAnalysesForUser } from "@/repositories/analysisRepository";
 import { runAnalysisForStocks } from "@/services/analysisOrchestrator";
 import { generatePortfolioAnalysis } from "@/services/portfolioAIService";
@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
 
 function buildPortfolioInputs(
   results: OrchestrationResult[],
-  stockMap: Map<string, { id: string; ticker: string; investmentHorizon: InvestmentHorizon }>
+  stockMap: Map<string, PrismaStock>
 ) {
   return results
     .filter((r) => r.success && r.analysis)
@@ -116,6 +116,13 @@ function buildPortfolioInputs(
         try { keyMetrics = a.keyMetrics ? JSON.parse(a.keyMetrics) as string[] : []; } catch { /* ignore */ }
       }
 
+      const purchasePrice = stock?.purchasePrice ?? null;
+      const quantity      = stock?.quantity      ?? null;
+      const costBasis     = purchasePrice != null && quantity != null ? purchasePrice * quantity : null;
+      const currentValue  = quantity != null ? a.price * quantity : null;
+      const pnl           = costBasis != null && currentValue != null ? currentValue - costBasis : null;
+      const pnlPct        = pnl != null && costBasis && costBasis !== 0 ? (pnl / costBasis) * 100 : null;
+
       return {
         ticker:               r.ticker,
         price:                a.price,
@@ -126,6 +133,12 @@ function buildPortfolioInputs(
         divergenceAlert:      a.divergenceAlert,
         newsSentiment:        a.newsSentiment,
         keyMetrics,
+        purchasePrice,
+        quantity,
+        costBasis,
+        currentValue,
+        pnl,
+        pnlPct,
       };
     });
 }

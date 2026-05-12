@@ -5,6 +5,7 @@ import { calculateRiskLevel } from "@/lib/riskCalculator";
 import RiskBadge from "@/components/ui/RiskBadge";
 import RemoveStockButton from "./RemoveStockButton";
 import HorizonSelector from "./HorizonSelector";
+import PurchaseDataEditor from "./PurchaseDataEditor";
 import Link from "next/link";
 
 interface Props {
@@ -264,6 +265,53 @@ export default function StockCard({ stock }: Props) {
               <p className="text-xs text-gray-600 leading-relaxed">{a.newsSummary}</p>
             </div>
           )}
+
+          {/* Mi posición (P&L) */}
+          {(() => {
+            const hasPurchase = stock.purchasePrice != null && stock.quantity != null;
+            const costBasis   = hasPurchase ? stock.purchasePrice! * stock.quantity! : null;
+            const currentVal  = hasPurchase ? a.price * stock.quantity! : null;
+            const pnl         = costBasis != null && currentVal != null ? currentVal - costBasis : null;
+            const pnlPct      = pnl != null && costBasis && costBasis !== 0 ? (pnl / costBasis) * 100 : null;
+            const pnlColor    = pnl != null && pnl >= 0 ? "text-green-600" : "text-red-600";
+            const fmtMoney    = (n: number) =>
+              n.toLocaleString("es-ES", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
+
+            return (
+              <div className="border-t border-gray-100 pt-3 space-y-2">
+                {hasPurchase && (
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-gray-50 rounded-lg py-2 px-2 border border-gray-100">
+                      <p className="text-xs text-gray-500">Invertido</p>
+                      <p className="text-sm font-semibold text-gray-800">{fmtMoney(costBasis!)}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg py-2 px-2 border border-gray-100">
+                      <p className="text-xs text-gray-500">Valor actual</p>
+                      <p className="text-sm font-semibold text-gray-800">{fmtMoney(currentVal!)}</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg py-2 px-2 border border-gray-100">
+                      <p className="text-xs text-gray-500">P&L</p>
+                      <p className={`text-sm font-semibold ${pnlColor}`}>
+                        {pnl != null && pnl >= 0 ? "+" : ""}
+                        {pnl != null ? fmtMoney(pnl) : "—"}
+                      </p>
+                      {pnlPct != null && (
+                        <p className={`text-xs ${pnlColor}`}>
+                          {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <PurchaseDataEditor
+                  ticker={stock.ticker}
+                  purchasePrice={stock.purchasePrice}
+                  quantity={stock.quantity}
+                  purchaseDate={stock.purchaseDate ? stock.purchaseDate.toISOString() : null}
+                />
+              </div>
+            );
+          })()}
 
           {/* Footer: timestamp + enlace historial */}
           <div className="flex items-center justify-between">

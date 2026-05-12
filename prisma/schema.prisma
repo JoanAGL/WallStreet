@@ -36,12 +36,15 @@ model PortfolioAnalysis {
 }
 
 model Stock {
-  id        String   @id @default(cuid())
+  id                String            @id @default(cuid())
   ticker            String
   userId            String
   investmentHorizon InvestmentHorizon @default(SHORT_TERM)
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt         DateTime @default(now())
+  purchasePrice     Float?
+  purchaseDate      DateTime?
+  quantity          Float?
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime          @default(now())
 
   analysis  StockAnalysis?
   history   StockAnalysisHistory[]

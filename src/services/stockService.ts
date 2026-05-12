@@ -4,6 +4,7 @@ import {
   findStockByTickerAndUser,
   addStock,
   updateStockHorizon,
+  updateStockPurchaseData,
   removeStock,
 } from "@/repositories/stockRepository";
 import { validateTickerExists } from "@/lib/yahooFinanceClient";
@@ -94,6 +95,22 @@ export async function updateUserStockHorizon(
 
   const updated = await updateStockHorizon(normalized, userId, horizon as InvestmentHorizon);
   return { success: true, data: { ticker: updated.ticker, investmentHorizon: updated.investmentHorizon } };
+}
+
+export async function updateUserStockPurchaseData(
+  ticker: string,
+  userId: string,
+  data: { purchasePrice: number | null; quantity: number | null; purchaseDate: Date | null }
+): Promise<StockServiceResult<{ ticker: string }>> {
+  const normalized = ticker.toUpperCase().trim();
+
+  const existing = await findStockByTickerAndUser(normalized, userId);
+  if (!existing) {
+    return { success: false, error: "Acción no encontrada en tu lista.", status: 404 };
+  }
+
+  const updated = await updateStockPurchaseData(normalized, userId, data);
+  return { success: true, data: { ticker: updated.ticker } };
 }
 
 export async function removeUserStock(
