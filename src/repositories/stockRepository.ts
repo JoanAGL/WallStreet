@@ -1,10 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import type { StockWithAnalysis } from "@/types/models";
+import type { InvestmentHorizon, StockWithAnalysis } from "@/types/models";
 
 export type { StockWithAnalysis };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type PrismaStock = { id: string; ticker: string; userId: string; createdAt: Date };
+type PrismaStock = { id: string; ticker: string; userId: string; investmentHorizon: InvestmentHorizon; createdAt: Date };
 
 export async function getStocksByUser(userId: string): Promise<PrismaStock[]> {
   return prisma.stock.findMany({
@@ -53,6 +53,17 @@ export async function findStockByTickerAndUser(
 
 export async function addStock(ticker: string, userId: string): Promise<PrismaStock> {
   return prisma.stock.create({ data: { ticker, userId } });
+}
+
+export async function updateStockHorizon(
+  ticker: string,
+  userId: string,
+  investmentHorizon: InvestmentHorizon
+): Promise<PrismaStock> {
+  return prisma.stock.update({
+    where: { ticker_userId: { ticker, userId } },
+    data: { investmentHorizon },
+  });
 }
 
 export async function removeStock(ticker: string, userId: string): Promise<void> {

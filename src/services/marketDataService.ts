@@ -12,9 +12,11 @@ export interface CurrentQuote {
 
 export interface HistoricalData {
   ticker: string;
-  /** Precios de cierre diarios, del más reciente al más antiguo */
-  closes: number[];
-  dates: string[];
+  closes:     number[];
+  highs:      number[];
+  lows:       number[];
+  volumes:    number[];
+  dates:      string[];
 }
 
 export async function getCurrentQuote(ticker: string): Promise<CurrentQuote> {
@@ -40,12 +42,15 @@ export async function getHistoricalCloses(
 ): Promise<HistoricalData> {
   const candles = await fetchYahooCandles(ticker, days);
 
-  // Invertimos para que el índice 0 sea el más reciente (requerido por TechnicalAnalysisService)
-  const closes = [...candles.closes].reverse().slice(0, days);
-  const dates = [...candles.timestamps]
+  // Invertimos para que índice 0 = más reciente
+  const closes  = [...candles.closes].reverse().slice(0, days);
+  const highs   = [...candles.highs].reverse().slice(0, days);
+  const lows    = [...candles.lows].reverse().slice(0, days);
+  const volumes = [...candles.volumes].reverse().slice(0, days);
+  const dates   = [...candles.timestamps]
     .reverse()
     .slice(0, days)
     .map((t) => new Date(t * 1000).toISOString().slice(0, 10));
 
-  return { ticker, closes, dates };
+  return { ticker, closes, highs, lows, volumes, dates };
 }

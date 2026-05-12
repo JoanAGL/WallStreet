@@ -3,6 +3,14 @@
  * Se usan cuando el TS server no resuelve correctamente el cliente generado.
  */
 
+export type InvestmentHorizon = "SHORT_TERM" | "MEDIUM_TERM" | "LONG_TERM";
+
+export const HORIZON_LABELS: Record<InvestmentHorizon, string> = {
+  SHORT_TERM:  "Corto Plazo",
+  MEDIUM_TERM: "Medio Plazo",
+  LONG_TERM:   "Largo Plazo",
+};
+
 export interface StockAnalysisModel {
   id: string;
   stockId: string;
@@ -17,6 +25,9 @@ export interface StockAnalysisModel {
   scenarioLabel: string;
   scenarioJustification: string;
   divergenceAlert: boolean;
+  horizonMatch: string | null;
+  keyMetrics: string | null;   // JSON string[]
+  metricsData: string | null;  // JSON object with horizon-specific metrics
   generatedAt: Date;
   updatedAt: Date;
 }
@@ -25,6 +36,7 @@ export interface StockModel {
   id: string;
   ticker: string;
   userId: string;
+  investmentHorizon: InvestmentHorizon;
   createdAt: Date;
 }
 

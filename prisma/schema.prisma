@@ -8,6 +8,12 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum InvestmentHorizon {
+  SHORT_TERM
+  MEDIUM_TERM
+  LONG_TERM
+}
+
 model User {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -21,10 +27,11 @@ model User {
 
 model Stock {
   id        String   @id @default(cuid())
-  ticker    String
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  ticker            String
+  userId            String
+  investmentHorizon InvestmentHorizon @default(SHORT_TERM)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
 
   analysis  StockAnalysis?
 
@@ -50,6 +57,9 @@ model StockAnalysis {
   scenarioLabel         String
   scenarioJustification String
   divergenceAlert       Boolean  @default(false)
+  horizonMatch          String?
+  keyMetrics            String?
+  metricsData           String?
 
   generatedAt           DateTime @default(now())
   updatedAt             DateTime @updatedAt

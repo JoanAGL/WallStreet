@@ -3,9 +3,13 @@ import {
   countStocksByUser,
   findStockByTickerAndUser,
   addStock,
+  updateStockHorizon,
   removeStock,
 } from "@/repositories/stockRepository";
 import { validateTickerExists } from "@/lib/yahooFinanceClient";
+import type { InvestmentHorizon } from "@/types/models";
+
+const VALID_HORIZONS = new Set<InvestmentHorizon>(["SHORT_TERM", "MEDIUM_TERM", "LONG_TERM"]);
 
 const MAX_STOCKS = 5;
 // Formato válido: 1-5 letras mayúsculas, opcionalmente seguido de punto y más letras (ej: BRK.B)
@@ -62,6 +66,34 @@ export async function addUserStock(
 
   const stock = await addStock(normalized, userId);
   return { success: true, data: stock };
+}
+
+export async function updateUserStockHorizon(
+  ticker: string,
+  userId: string,
+  horizon: string
+): Promise<StockServiceResult<{ ticker: string; investmentHorizon: InvestmentHorizon }>> {
+  const normalized = ticker.toUpperCase().trim();
+
+  if (!VALID_HORIZONS.has(horizon as InvestmentHorizon)) {
+    return {
+      success: false,
+      error: "Horizonte inválido. Usa: SHORT_TERM, MEDIUM_TERM o LONG_TERM.",
+      status: 400,
+    };
+  }
+
+  const existing = await findStockByTickerAndUser(normalized, userId);
+  if (!existing) {
+    return {
+      success: false,
+      error: "Acción no encontrada en tu lista.",
+      status: 404,
+    };
+  }
+
+  const updated = await updateStockHorizon(normalized, userId, horizon as InvestmentHorizon);
+  return { success: true, data: { ticker: updated.ticker, investmentHorizon: updated.investmentHorizon } };
 }
 
 export async function removeUserStock(

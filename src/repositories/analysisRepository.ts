@@ -1,7 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { StockAnalysisModel } from "@/types/models";
 
-// El cliente Prisma generado tiene stockAnalysis en runtime aunque el TS server no lo vea
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const stockAnalysis = (prisma as any).stockAnalysis as {
   upsert: (args: unknown) => Promise<StockAnalysisModel>;
@@ -22,6 +21,9 @@ export interface UpsertAnalysisData {
   scenarioLabel: string;
   scenarioJustification: string;
   divergenceAlert: boolean;
+  horizonMatch: string | null;
+  keyMetrics: string | null;
+  metricsData: string | null;
 }
 
 export async function upsertAnalysis(
