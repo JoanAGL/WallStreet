@@ -192,7 +192,7 @@ export async function runAnalysisForStocks(
         });
         dataIssues.push({ kind: "API_ERROR", source: "ai", message: msg });
         finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg, analysis, dataIssues });
-      } catch (persistErr) {
+      } catch (_persistErr) {
         finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg, dataIssues });
       }
     }

@@ -79,7 +79,7 @@ export type FundamentalMetrics =
 
 export async function fetchFundamentals(
   ticker: string,
-  horizon: "MEDIUM_TERM" | "LONG_TERM"
+  horizon: InvestmentHorizon
 ): Promise<FundamentalMetrics> {
   const url = `${SUMMARY_URL}/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,financialData,summaryDetail`;
 
