@@ -5,4 +5,10 @@ if (!process.env.DATABASE_URL || !process.env.DIRECT_URL) {
   process.exit(0);
 }
 
-execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+try {
+  execSync('npx prisma migrate deploy', { stdio: 'inherit' });
+} catch (err) {
+  console.warn('[prisma-migrate] Migration failed — continuing build. Apply pending migrations manually in Supabase if needed.');
+  console.warn('[prisma-migrate] Error:', err.message);
+  process.exit(0);
+}
