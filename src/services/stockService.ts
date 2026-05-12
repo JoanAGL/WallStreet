@@ -5,6 +5,7 @@ import {
   addStock,
   removeStock,
 } from "@/repositories/stockRepository";
+import { validateTickerExists } from "@/lib/yahooFinanceClient";
 
 const MAX_STOCKS = 5;
 // Formato válido: 1-5 letras mayúsculas, opcionalmente seguido de punto y más letras (ej: BRK.B)
@@ -47,6 +48,15 @@ export async function addUserStock(
       success: false,
       error: "Ya tienes esta acción en tu lista.",
       status: 409,
+    };
+  }
+
+  const tickerExists = await validateTickerExists(normalized);
+  if (!tickerExists) {
+    return {
+      success: false,
+      error: `El ticker "${normalized}" no es válido o no existe en los mercados soportados.`,
+      status: 400,
     };
   }
 

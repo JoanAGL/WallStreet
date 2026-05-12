@@ -19,6 +19,35 @@ export interface YahooCandles {
   timestamps: number[];
 }
 
+/**
+ * Comprueba si un ticker existe en Yahoo Finance haciendo una petición
+ * mínima (5 días). Devuelve false ante cualquier error o datos vacíos.
+ */
+export async function validateTickerExists(ticker: string): Promise<boolean> {
+  const url = `${BASE_URL}/${encodeURIComponent(ticker)}?interval=1d&range=5d&includePrePost=false`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0" },
+      next: { revalidate: 0 },
+    });
+
+    if (!res.ok) return false;
+
+    const data = (await res.json()) as YahooChartResponse;
+
+    if (data.chart.error) return false;
+
+    const result = data.chart.result?.[0];
+    if (!result?.timestamp?.length) return false;
+
+    const closes = result.indicators.quote[0]?.close ?? [];
+    return closes.some((c) => c != null && c > 0);
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchYahooCandles(
   ticker: string,
   days = 60
