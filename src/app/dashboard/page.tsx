@@ -2,11 +2,13 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getStocksWithAnalysis } from "@/repositories/stockRepository";
+import { getPortfolioAnalysis } from "@/repositories/portfolioAnalysisRepository";
 import StockCard from "@/components/dashboard/StockCard";
 import AddStockForm from "@/components/dashboard/AddStockForm";
 import UpdateButton from "@/components/dashboard/UpdateButton";
 import Disclaimer from "@/components/ui/Disclaimer";
 import PortfolioSummary from "@/components/dashboard/PortfolioSummary";
+import PortfolioAIInsights from "@/components/dashboard/PortfolioAIInsights";
 
 export const dynamic = "force-dynamic";
 
@@ -14,21 +16,23 @@ export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
-  const stocks = await getStocksWithAnalysis(session.user.id);
+  const [stocks, portfolioAnalysis] = await Promise.all([
+    getStocksWithAnalysis(session.user.id),
+    getPortfolioAnalysis(session.user.id),
+  ]);
 
-  // Timestamp de la última actualización (el análisis más reciente)
   const lastUpdatedAt = stocks
     .map((s) => s.analysis?.updatedAt)
     .filter(Boolean)
     .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())[0]
     ?.toISOString() ?? null;
 
+  const stocksWithAnalysis = stocks.filter((s) => s.analysis).length;
+
   return (
     <div className="space-y-6">
-      {/* Disclaimer legal — siempre visible, no ocultable */}
       <Disclaimer />
 
-      {/* Barra de acciones */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Mis acciones</h1>
@@ -39,10 +43,16 @@ export default async function DashboardPage() {
         <UpdateButton lastUpdatedAt={lastUpdatedAt} />
       </div>
 
-      {/* Resumen de cartera */}
       <PortfolioSummary stocks={stocks} />
 
-      {/* Formulario añadir acción */}
+      {portfolioAnalysis && stocksWithAnalysis >= 2 && (
+        <PortfolioAIInsights
+          analysisJson={portfolioAnalysis.analysisJson}
+          stockCount={portfolioAnalysis.stockCount}
+          updatedAt={portfolioAnalysis.updatedAt}
+        />
+      )}
+
       <div className="bg-white border border-gray-200 rounded-xl p-4">
         <p className="text-sm font-medium text-gray-700 mb-3">
           Añadir acción (NYSE / NASDAQ)
@@ -50,7 +60,6 @@ export default async function DashboardPage() {
         <AddStockForm currentCount={stocks.length} />
       </div>
 
-      {/* Lista de acciones */}
       {stocks.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-4xl mb-3">📈</p>

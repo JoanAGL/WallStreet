@@ -22,7 +22,17 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  stocks    Stock[]
+  stocks            Stock[]
+  portfolioAnalysis PortfolioAnalysis?
+}
+
+model PortfolioAnalysis {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analysisJson String
+  stockCount   Int
+  updatedAt    DateTime @updatedAt
 }
 
 model Stock {
