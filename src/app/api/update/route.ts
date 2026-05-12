@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
   }
 
   const results = await runAnalysisForStocks(
-    stocks.map((s) => ({ id: s.id, ticker: s.ticker })),
+    stocks.map((s) => ({ id: s.id, ticker: s.ticker, investmentHorizon: s.investmentHorizon })),
     forceUpdate
   );
 
