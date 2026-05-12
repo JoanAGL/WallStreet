@@ -85,16 +85,28 @@ export async function fetchFundamentals(
 
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
       next: { revalidate: 0 },
     });
 
-    if (!res.ok) throw new Error(`Yahoo quoteSummary ${res.status}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Yahoo quoteSummary HTTP ${res.status}: ${body.slice(0, 200)}`);
+    }
 
     const data = (await res.json()) as YahooSummaryResponse;
+
+    if (data.quoteSummary?.error) {
+      throw new Error(`Yahoo quoteSummary error: ${JSON.stringify(data.quoteSummary.error)}`);
+    }
+
     const r = data.quoteSummary?.result?.[0];
 
-    if (!r) throw new Error("Sin datos fundamentales");
+    if (!r) throw new Error("Sin datos fundamentales: result vacío");
 
     const ks = r.defaultKeyStatistics;
     const fd = r.financialData;
@@ -126,8 +138,8 @@ export async function fetchFundamentals(
       freeCashflowYield: fcfYield,
       beta:             raw(sd?.beta ?? ks?.beta),
     };
-  } catch {
-    // Return all-null fallback on any fetch failure
+  } catch (err) {
+    console.error(`[fetchFundamentals] ${ticker} (${horizon}):`, err instanceof Error ? err.message : err);
     if (horizon === "MEDIUM_TERM") {
       return { horizon: "MEDIUM_TERM", revenueGrowthYoY: null, forwardEps: null, pegRatio: null, debtToEquity: null, returnOnEquity: null };
     }
