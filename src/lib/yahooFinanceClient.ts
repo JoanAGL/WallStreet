@@ -99,79 +99,80 @@ export type FundamentalMetrics =
   | ({ horizon: "MEDIUM_TERM" } & MediumTermFundamentals)
   | ({ horizon: "LONG_TERM" }  & LongTermFundamentals);
 
-export async function fetchFundamentals(
-  ticker: string,
-  horizon: InvestmentHorizon
-): Promise<FundamentalMetrics> {
+export interface AllFundamentals {
+  medium: MediumTermFundamentals;
+  long:   LongTermFundamentals;
+}
+
+const NULL_MEDIUM: MediumTermFundamentals = { revenueGrowthYoY: null, forwardEps: null, pegRatio: null, debtToEquity: null, returnOnEquity: null };
+const NULL_LONG:   LongTermFundamentals   = { trailingPE: null, dividendYield: null, profitMargin: null, freeCashflowYield: null, beta: null };
+
+async function fetchQuoteSummaryRaw(ticker: string): Promise<YahooSummaryResponse["quoteSummary"]["result"]> {
   const url = `${SUMMARY_URL}/${encodeURIComponent(ticker)}?modules=defaultKeyStatistics,financialData,summaryDetail`;
+  const auth = await fetchYahooCrumb();
+  const urlWithCrumb = auth ? `${url}&crumb=${encodeURIComponent(auth.crumb)}` : url;
 
+  const headers: Record<string, string> = {
+    "User-Agent": YAHOO_UA,
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+  if (auth?.cookie) headers["Cookie"] = auth.cookie;
+
+  const res = await fetch(urlWithCrumb, { headers, next: { revalidate: 0 } });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Yahoo quoteSummary HTTP ${res.status}: ${body.slice(0, 200)}`);
+  }
+
+  const data = (await res.json()) as YahooSummaryResponse;
+  if (data.quoteSummary?.error) throw new Error(`Yahoo error: ${JSON.stringify(data.quoteSummary.error)}`);
+  return data.quoteSummary?.result ?? null;
+}
+
+/** Fetches MEDIUM + LONG fundamentals in a single API call. Never throws. */
+export async function fetchAllFundamentals(ticker: string): Promise<AllFundamentals> {
   try {
-    const auth = await fetchYahooCrumb();
-    const urlWithCrumb = auth
-      ? `${url}&crumb=${encodeURIComponent(auth.crumb)}`
-      : url;
-
-    const headers: Record<string, string> = {
-      "User-Agent": YAHOO_UA,
-      "Accept": "application/json",
-      "Accept-Language": "en-US,en;q=0.9",
-    };
-    if (auth?.cookie) headers["Cookie"] = auth.cookie;
-
-    const res = await fetch(urlWithCrumb, { headers, next: { revalidate: 0 } });
-
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Yahoo quoteSummary HTTP ${res.status}: ${body.slice(0, 200)}`);
-    }
-
-    const data = (await res.json()) as YahooSummaryResponse;
-
-    if (data.quoteSummary?.error) {
-      throw new Error(`Yahoo quoteSummary error: ${JSON.stringify(data.quoteSummary.error)}`);
-    }
-
-    const r = data.quoteSummary?.result?.[0];
-
-    if (!r) throw new Error("Sin datos fundamentales: result vacío");
+    const result = await fetchQuoteSummaryRaw(ticker);
+    const r = result?.[0];
+    if (!r) throw new Error("result vacío");
 
     const ks = r.defaultKeyStatistics;
     const fd = r.financialData;
     const sd = r.summaryDetail;
 
-    if (horizon === "MEDIUM_TERM") {
-      return {
-        horizon: "MEDIUM_TERM",
+    const fcf    = raw(fd?.freeCashflow);
+    const mktCap = raw(sd?.marketCap);
+    const fcfYield = fcf != null && mktCap != null && mktCap > 0 ? fcf / mktCap : null;
+
+    return {
+      medium: {
         revenueGrowthYoY: raw(fd?.revenueGrowth),
         forwardEps:       raw(ks?.forwardEps),
         pegRatio:         raw(ks?.pegRatio),
         debtToEquity:     raw(fd?.debtToEquity),
         returnOnEquity:   raw(fd?.returnOnEquity),
-      };
-    }
-
-    // LONG_TERM
-    const fcf = raw(fd?.freeCashflow);
-    const mktCap = raw(sd?.marketCap);
-    const fcfYield = fcf != null && mktCap != null && mktCap > 0
-      ? fcf / mktCap
-      : null;
-
-    return {
-      horizon: "LONG_TERM",
-      trailingPE:       raw(sd?.trailingPE),
-      dividendYield:    raw(sd?.dividendYield),
-      profitMargin:     raw(fd?.profitMargins),
-      freeCashflowYield: fcfYield,
-      beta:             raw(sd?.beta ?? ks?.beta),
+      },
+      long: {
+        trailingPE:        raw(sd?.trailingPE),
+        dividendYield:     raw(sd?.dividendYield),
+        profitMargin:      raw(fd?.profitMargins),
+        freeCashflowYield: fcfYield,
+        beta:              raw(sd?.beta ?? ks?.beta),
+      },
     };
   } catch (err) {
-    console.error(`[fetchFundamentals] ${ticker} (${horizon}):`, err instanceof Error ? err.message : err);
-    if (horizon === "MEDIUM_TERM") {
-      return { horizon: "MEDIUM_TERM", revenueGrowthYoY: null, forwardEps: null, pegRatio: null, debtToEquity: null, returnOnEquity: null };
-    }
-    return { horizon: "LONG_TERM", trailingPE: null, dividendYield: null, profitMargin: null, freeCashflowYield: null, beta: null };
+    console.error(`[fetchAllFundamentals] ${ticker}:`, err instanceof Error ? err.message : err);
+    return { medium: NULL_MEDIUM, long: NULL_LONG };
   }
+}
+
+/** @deprecated Use fetchAllFundamentals. Kept for compatibility. */
+export async function fetchFundamentals(ticker: string, horizon: InvestmentHorizon): Promise<FundamentalMetrics> {
+  const all = await fetchAllFundamentals(ticker);
+  return horizon === "MEDIUM_TERM"
+    ? { horizon: "MEDIUM_TERM", ...all.medium }
+    : { horizon: "LONG_TERM",   ...all.long };
 }
 
 // ── Chart (candles) ──────────────────────────────────────────────────────────

@@ -39,41 +39,56 @@ function getStoredHorizon(metricsData: string | null): InvestmentHorizon | null 
   } catch { return null; }
 }
 
+type MetricsMap = Record<string, number | null>;
+
+function parseMetricsData(raw: string | null): { short: MetricsMap; medium: MetricsMap; long: MetricsMap } {
+  const empty = { short: {}, medium: {}, long: {} };
+  if (!raw) return empty;
+  try {
+    const p = JSON.parse(raw) as Record<string, unknown>;
+    // New nested structure
+    if (p.short !== undefined || p.medium !== undefined || p.long !== undefined) {
+      return {
+        short:  (p.short  as MetricsMap) ?? {},
+        medium: (p.medium as MetricsMap) ?? {},
+        long:   (p.long   as MetricsMap) ?? {},
+      };
+    }
+    // Legacy flat structure — best-effort map
+    return { short: p as MetricsMap, medium: p as MetricsMap, long: p as MetricsMap };
+  } catch { return empty; }
+}
+
 function buildMetricsGrid(horizon: InvestmentHorizon, a: StockWithAnalysis["analysis"]): MetricEntry[] {
   if (!a) return [];
-
-  let extra: Record<string, number | null> = {};
-  if (a.metricsData) {
-    try { extra = JSON.parse(a.metricsData); } catch { /* ignore */ }
-  }
+  const { short, medium, long } = parseMetricsData(a.metricsData);
 
   if (horizon === "SHORT_TERM") {
     return [
-      { label: "SMA 20",   value: fmt(a.sma20) },
-      { label: "SMA 50",   value: fmt(a.sma50) },
-      { label: "RSI 14",   value: fmt(a.rsi14) },
-      { label: "ATR 14",   value: fmt(extra.atr14 ?? null) },
-      { label: "Vol. Rel.", value: extra.relVolume != null ? `${fmt(extra.relVolume)}x` : "—" },
+      { label: "SMA 20",    value: fmt(a.sma20) },
+      { label: "SMA 50",    value: fmt(a.sma50) },
+      { label: "RSI 14",    value: fmt(a.rsi14) },
+      { label: "ATR 14",    value: fmt(short.atr14 ?? null) },
+      { label: "Vol. Rel.", value: short.relVolume != null ? `${fmt(short.relVolume)}x` : "—" },
     ];
   }
 
   if (horizon === "MEDIUM_TERM") {
     return [
-      { label: "Rev. Growth",  value: fmtPct(extra.revenueGrowthYoY ?? null) },
-      { label: "EPS Fwd",      value: fmt(extra.forwardEps ?? null) },
-      { label: "PEG Ratio",    value: fmt(extra.pegRatio ?? null) },
-      { label: "Deuda/Capital",value: fmt(extra.debtToEquity ?? null) },
-      { label: "ROE",          value: fmtPct(extra.returnOnEquity ?? null) },
+      { label: "Rev. Growth",   value: fmtPct(medium.revenueGrowthYoY ?? null) },
+      { label: "EPS Fwd",       value: fmt(medium.forwardEps ?? null) },
+      { label: "PEG Ratio",     value: fmt(medium.pegRatio ?? null) },
+      { label: "Deuda/Capital", value: fmt(medium.debtToEquity ?? null) },
+      { label: "ROE",           value: fmtPct(medium.returnOnEquity ?? null) },
     ];
   }
 
-  // LONG_TERM
   return [
-    { label: "P/E Trailing",  value: fmt(extra.trailingPE ?? null) },
-    { label: "Div. Yield",    value: fmtPct(extra.dividendYield ?? null) },
-    { label: "Margen Neto",   value: fmtPct(extra.profitMargin ?? null) },
-    { label: "FCF Yield",     value: fmtPct(extra.freeCashflowYield ?? null) },
-    { label: "Beta",          value: fmt(extra.beta ?? null) },
+    { label: "P/E Trailing", value: fmt(long.trailingPE ?? null) },
+    { label: "Div. Yield",   value: fmtPct(long.dividendYield ?? null) },
+    { label: "Margen Neto",  value: fmtPct(long.profitMargin ?? null) },
+    { label: "FCF Yield",    value: fmtPct(long.freeCashflowYield ?? null) },
+    { label: "Beta",         value: fmt(long.beta ?? null) },
   ];
 }
 

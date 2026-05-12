@@ -3,8 +3,8 @@ import { calculateIndicators } from "./technicalAnalysisService";
 import { analyzeNewsForTicker } from "./newsAnalysisService";
 import type { DataIssue } from "./newsAnalysisService";
 import { generateStockAnalysis } from "./aiAnalysisService";
-import { fetchFundamentals } from "@/lib/yahooFinanceClient";
-import type { FundamentalMetrics } from "@/lib/yahooFinanceClient";
+import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
+import type { AllFundamentals, FundamentalMetrics } from "@/lib/yahooFinanceClient";
 import { upsertAnalysis, getAnalysisByStockId } from "@/repositories/analysisRepository";
 import type { StockAnalysisModel, InvestmentHorizon } from "@/types/models";
 
@@ -65,22 +65,25 @@ export async function runAnalysisForStocks(
 
   console.log(`[ORCHESTRATOR] ${staleStocks.length} stale / ${finalResults.length} cached (force=${forceUpdate})`);
 
-  // ── Fase 2: Market data (paralelo, sin Gemini) ────────────────────────────
+  // ── Fase 2: Market data + fundamentals (paralelo, sin Gemini) ────────────
   type MarketData = {
     stock: typeof stocks[0];
     quote: Awaited<ReturnType<typeof getCurrentQuote>>;
     indicators: ReturnType<typeof calculateIndicators>;
+    allFundamentals: AllFundamentals;
   };
 
   const marketResults = await Promise.allSettled(
     staleStocks.map(async (stock): Promise<MarketData> => {
-      const [quote, historical] = await Promise.all([
+      const [quote, historical, allFundamentals] = await Promise.all([
         getCurrentQuote(stock.ticker),
         getHistoricalCloses(stock.ticker, 60),
+        fetchAllFundamentals(stock.ticker), // nunca lanza — devuelve nulls en caso de error
       ]);
       return {
         stock,
         quote,
+        allFundamentals,
         indicators: calculateIndicators(
           stock.ticker,
           historical.closes,
@@ -111,20 +114,20 @@ export async function runAnalysisForStocks(
 
   if (withMarket.length === 0) return finalResults;
 
-  // ── Fases 3+4+5: Gemini secuencial + fundamentals según horizonte ─────────
-  for (const { stock, quote, indicators } of withMarket) {
+  // ── Fases 3+4+5: Gemini secuencial ───────────────────────────────────────
+  for (const { stock, quote, indicators, allFundamentals } of withMarket) {
     const horizon: InvestmentHorizon = stock.investmentHorizon ?? "SHORT_TERM";
     let newsAnalysis: Awaited<ReturnType<typeof analyzeNewsForTicker>> | null = null;
     const dataIssues: DataIssue[] = [];
 
-    try {
-      // Fase 3a: Fundamentals (solo MEDIUM/LONG, sin Gemini)
-      let fundamentals: FundamentalMetrics | null = null;
-      if (horizon === "MEDIUM_TERM" || horizon === "LONG_TERM") {
-        fundamentals = await fetchFundamentals(stock.ticker, horizon);
-      }
+    // Fundamentals ya disponibles desde la fase paralela — seleccionar los del horizonte activo para Gemini
+    const fundamentals: FundamentalMetrics | null =
+      horizon === "MEDIUM_TERM" ? { horizon: "MEDIUM_TERM", ...allFundamentals.medium } :
+      horizon === "LONG_TERM"   ? { horizon: "LONG_TERM",   ...allFundamentals.long }   :
+      null;
 
-      // Fase 3b: News analysis (Gemini — no fatal)
+    try {
+      // Fase 3: News analysis (Gemini — no fatal)
       newsAnalysis = await analyzeNewsForTicker(stock.ticker);
       if (newsAnalysis.dataIssue) dataIssues.push(newsAnalysis.dataIssue);
 
@@ -140,7 +143,7 @@ export async function runAnalysisForStocks(
       );
 
       // Fase 5: Persist
-      const metricsData = buildMetricsData(horizon, indicators, fundamentals);
+      const metricsData = buildMetricsData(horizon, indicators, allFundamentals);
 
       const analysis = await upsertAnalysis({
         stockId:              stock.id,
@@ -204,36 +207,12 @@ export async function runAnalysisForStocks(
 function buildMetricsData(
   horizon: InvestmentHorizon,
   indicators: ReturnType<typeof calculateIndicators>,
-  fundamentals: FundamentalMetrics | null
-): Record<string, number | null | string> {
-  // _horizon marks which horizon this analysis belongs to (used by UI to detect stale data)
-  const base: Record<string, number | null | string> = {
-    _horizon:  horizon,
-    atr14:     indicators.atr14,
-    relVolume: indicators.relVolume,
+  allFundamentals: AllFundamentals
+): Record<string, unknown> {
+  return {
+    _horizon: horizon,
+    short:  { atr14: indicators.atr14, relVolume: indicators.relVolume },
+    medium: allFundamentals.medium,
+    long:   allFundamentals.long,
   };
-
-  if (horizon === "SHORT_TERM") return base;
-
-  if (horizon === "MEDIUM_TERM" && fundamentals?.horizon === "MEDIUM_TERM") {
-    return {
-      ...base,
-      revenueGrowthYoY: fundamentals.revenueGrowthYoY,
-      forwardEps:       fundamentals.forwardEps,
-      pegRatio:         fundamentals.pegRatio,
-      debtToEquity:     fundamentals.debtToEquity,
-      returnOnEquity:   fundamentals.returnOnEquity,
-    };
-  }
-  if (horizon === "LONG_TERM" && fundamentals?.horizon === "LONG_TERM") {
-    return {
-      ...base,
-      trailingPE:        fundamentals.trailingPE,
-      dividendYield:     fundamentals.dividendYield,
-      profitMargin:      fundamentals.profitMargin,
-      freeCashflowYield: fundamentals.freeCashflowYield,
-      beta:              fundamentals.beta,
-    };
-  }
-  return base;
 }
