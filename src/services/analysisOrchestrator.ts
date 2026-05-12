@@ -1,9 +1,8 @@
 import { getCurrentQuote, getHistoricalCloses } from "./marketDataService";
 import { calculateIndicators } from "./technicalAnalysisService";
 import { analyzeNewsForTicker } from "./newsAnalysisService";
-import type { DataIssue, NewsAnalysis } from "./newsAnalysisService";
+import type { DataIssue } from "./newsAnalysisService";
 import { generateStockAnalysis } from "./aiAnalysisService";
-import type { AIStockAnalysis } from "./aiAnalysisService";
 import { upsertAnalysis, getAnalysisByStockId } from "@/repositories/analysisRepository";
 import type { StockAnalysisModel } from "@/types/models";
 
@@ -42,13 +41,14 @@ export async function runAnalysisForStock(
  *
  * Fases:
  *  1. Freshness check (DB reads en paralelo) → split fresh/stale
- *  2. Market data para tickers stale (paralelo)
- *  3. News analysis — todas las llamadas Gemini en paralelo
- *  4. AI stock analysis — todas las llamadas Gemini en paralelo
- *  5. Persist — todos los upserts en paralelo
+ *  2. Market data para tickers stale (paralelo — no Gemini)
+ *  3. Por cada stock stale con market data (SECUENCIAL):
+ *       news Gemini → AI Gemini → upsert
+ *     El fallo de un ticker no detiene a los demás (try/catch por stock).
  *
- * Promise.allSettled en cada fase garantiza que el fallo de un ticker
- * no detiene el procesamiento de los demás.
+ * Las fases de Gemini son secuenciales para respetar el rate-limit del
+ * tier gratuito (20 RPM). Si se recibe un 429, geminiClient espera el
+ * tiempo exacto que Gemini indica en su cuerpo de error ("retry in Xs").
  */
 export async function runAnalysisForStocks(
   stocks: { id: string; ticker: string }[],
@@ -126,100 +126,55 @@ export async function runAnalysisForStocks(
 
   if (withMarket.length === 0) return finalResults;
 
-  // ── Fase 3: News analysis — todas las llamadas Gemini en paralelo ─────────
-  const newsResults = await Promise.allSettled(
-    withMarket.map(({ stock }) => analyzeNewsForTicker(stock.ticker))
-  );
+  // ── Fases 3+4+5: Gemini secuencial por stock ─────────────────────────────
+  // Procesar un stock a la vez para no saturar el rate-limit de Gemini.
+  // El fallo de un ticker queda aislado y no interrumpe a los siguientes.
+  for (const { stock, quote, indicators } of withMarket) {
+    try {
+      const dataIssues: DataIssue[] = [];
 
-  // ── Fase 4: AI stock analysis — todas las llamadas Gemini en paralelo ─────
-  const aiResults = await Promise.allSettled(
-    withMarket.map(({ stock, quote, indicators }, i): Promise<AIStockAnalysis> => {
-      const newsRes = newsResults[i];
-      const newsAnalysis: NewsAnalysis =
-        newsRes.status === "fulfilled"
-          ? newsRes.value
-          : {
-              ticker: stock.ticker,
-              articles: [],
-              summary: "Noticias no disponibles.",
-              sentiment: "Neutral",
-              analyzedAt: new Date().toISOString(),
-            };
+      // Fase 3: News analysis (Gemini)
+      const newsAnalysis = await analyzeNewsForTicker(stock.ticker);
+      if (newsAnalysis.dataIssue) dataIssues.push(newsAnalysis.dataIssue);
 
-      return generateStockAnalysis(
+      // Fase 4: AI stock analysis (Gemini)
+      const aiAnalysis = await generateStockAnalysis(
         stock.ticker,
         quote.price,
         quote.changePercent,
         indicators,
         newsAnalysis
       );
-    })
-  );
 
-  // ── Fase 5: Persist — todos los upserts en paralelo ──────────────────────
-  const persistJobs = withMarket.map(
-    async ({ stock, quote, indicators }, i): Promise<OrchestrationResult> => {
-      const newsRes = newsResults[i];
-      const aiRes = aiResults[i];
+      // Fase 5: Persist
+      const analysis = await upsertAnalysis({
+        stockId: stock.id,
+        price: quote.price,
+        changePercent: quote.changePercent,
+        sma20: indicators.sma20,
+        sma50: indicators.sma50,
+        rsi14: indicators.rsi14,
+        newsSummary: newsAnalysis.summary,
+        newsSentiment: newsAnalysis.sentiment,
+        analysisText: aiAnalysis.analysisText,
+        scenarioLabel: aiAnalysis.scenario.label,
+        scenarioJustification: aiAnalysis.scenario.justification,
+        divergenceAlert: aiAnalysis.divergenceAlert,
+      });
 
-      // Recoger dataIssues no fatales
-      const dataIssues: DataIssue[] = [];
-      if (newsRes.status === "fulfilled" && newsRes.value.dataIssue) {
-        dataIssues.push(newsRes.value.dataIssue);
-      } else if (newsRes.status === "rejected") {
-        const msg = newsRes.reason instanceof Error ? newsRes.reason.message : String(newsRes.reason);
-        dataIssues.push({ kind: "API_ERROR", source: "news", message: msg });
+      if (dataIssues.length) {
+        dataIssues.forEach((issue) =>
+          console.warn(`[ORCHESTRATOR] ${stock.ticker} - ${issue.kind} (${issue.source}): ${issue.message}`)
+        );
       }
 
-      if (aiRes.status === "rejected") {
-        const msg = aiRes.reason instanceof Error ? aiRes.reason.message : String(aiRes.reason);
-        dataIssues.push({ kind: "API_ERROR", source: "ai", message: msg });
-        return { ticker: stock.ticker, stockId: stock.id, success: false, error: msg, dataIssues };
-      }
-
-      const aiAnalysis = aiRes.value;
-      const newsSummary =
-        newsRes.status === "fulfilled" ? newsRes.value.summary : "No disponible";
-      const newsSentiment =
-        newsRes.status === "fulfilled" ? newsRes.value.sentiment : "Neutral";
-
-      try {
-        const analysis = await upsertAnalysis({
-          stockId: stock.id,
-          price: quote.price,
-          changePercent: quote.changePercent,
-          sma20: indicators.sma20,
-          sma50: indicators.sma50,
-          rsi14: indicators.rsi14,
-          newsSummary,
-          newsSentiment,
-          analysisText: aiAnalysis.analysisText,
-          scenarioLabel: aiAnalysis.scenario.label,
-          scenarioJustification: aiAnalysis.scenario.justification,
-          divergenceAlert: aiAnalysis.divergenceAlert,
-        });
-
-        if (dataIssues.length) {
-          dataIssues.forEach((issue) =>
-            console.warn(`[ORCHESTRATOR] ${stock.ticker} - ${issue.kind} (${issue.source}): ${issue.message}`)
-          );
-        }
-
-        return { ticker: stock.ticker, stockId: stock.id, success: true, analysis, dataIssues };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { ticker: stock.ticker, stockId: stock.id, success: false, error: msg, dataIssues };
-      }
+      finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: true, analysis, dataIssues });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[ORCHESTRATOR] ${stock.ticker}:`, msg);
+      finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg });
     }
-  );
-
-  const persistResults = await Promise.allSettled(persistJobs);
-
-  persistResults.forEach((r) => {
-    if (r.status === "fulfilled") {
-      finalResults.push(r.value);
-    }
-  });
+  }
 
   return finalResults;
 }

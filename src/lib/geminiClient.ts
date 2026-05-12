@@ -76,8 +76,12 @@ export async function geminiChat(
       const errorMessage = errorData?.error?.message || errorText;
 
       if (status === 429) {
-        const waitTime = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s, 8s...
         if (attempt < retries) {
+          // Respeta el tiempo sugerido por Gemini ("Please retry in Xs.")
+          const retryMatch = errorMessage.match(/retry in (\d+(?:\.\d+)?)s/i);
+          const waitTime = retryMatch
+            ? Math.min(Math.ceil(parseFloat(retryMatch[1])) * 1000, 55_000)
+            : Math.pow(2, attempt) * 2000;
           console.warn(`[Gemini] Rate limit. Reintentando en ${waitTime / 1000}s... (intento ${attempt + 1}/${retries})`);
           await new Promise(r => setTimeout(r, waitTime));
           continue;
