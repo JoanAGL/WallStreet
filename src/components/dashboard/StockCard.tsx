@@ -6,6 +6,7 @@ import RiskBadge from "@/components/ui/RiskBadge";
 import RemoveStockButton from "./RemoveStockButton";
 import HorizonSelector from "./HorizonSelector";
 import PurchaseDataEditor from "./PurchaseDataEditor";
+import StockUpdateMenu from "./StockUpdateMenu";
 import Link from "next/link";
 
 interface Props {
@@ -158,6 +159,7 @@ export default function StockCard({ stock }: Props) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {riskLevel && <RiskBadge level={riskLevel} />}
+          <StockUpdateMenu ticker={stock.ticker} />
           <RemoveStockButton ticker={stock.ticker} />
         </div>
       </div>

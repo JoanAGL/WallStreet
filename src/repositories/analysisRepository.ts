@@ -3,9 +3,10 @@ import type { StockAnalysisModel } from "@/types/models";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const stockAnalysis = (prisma as any).stockAnalysis as {
-  upsert: (args: unknown) => Promise<StockAnalysisModel>;
+  upsert:     (args: unknown) => Promise<StockAnalysisModel>;
+  update:     (args: unknown) => Promise<StockAnalysisModel>;
   findUnique: (args: unknown) => Promise<StockAnalysisModel | null>;
-  findMany: (args: unknown) => Promise<(StockAnalysisModel & { stock: { ticker: string } })[]>;
+  findMany:   (args: unknown) => Promise<(StockAnalysisModel & { stock: { ticker: string } })[]>;
 };
 
 export interface UpsertAnalysisData {
@@ -27,14 +28,25 @@ export interface UpsertAnalysisData {
   allHorizons: string | null;
 }
 
+export type PartialAnalysisData = Partial<Omit<UpsertAnalysisData, "stockId">>;
+
 export async function upsertAnalysis(
   data: UpsertAnalysisData
 ): Promise<StockAnalysisModel> {
   return stockAnalysis.upsert({
-    where: { stockId: data.stockId },
+    where:  { stockId: data.stockId },
     update: { ...data, generatedAt: new Date() },
     create: { ...data, generatedAt: new Date() },
   });
+}
+
+export async function patchAnalysisFields(
+  stockId: string,
+  data: PartialAnalysisData
+): Promise<StockAnalysisModel | null> {
+  const existing = await stockAnalysis.findUnique({ where: { stockId } });
+  if (!existing) return null;
+  return stockAnalysis.update({ where: { stockId }, data });
 }
 
 export async function getAnalysisByStockId(
@@ -47,7 +59,7 @@ export async function getAnalysesForUser(
   userId: string
 ): Promise<(StockAnalysisModel & { stock: { ticker: string } })[]> {
   return stockAnalysis.findMany({
-    where: { stock: { userId } },
+    where:   { stock: { userId } },
     include: { stock: { select: { ticker: true } } },
     orderBy: { stock: { createdAt: "asc" } },
   });

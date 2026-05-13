@@ -1,4 +1,5 @@
 import type { PortfolioAIAnalysis } from "@/services/portfolioAIService";
+import RegeneratePortfolioButton from "./RegeneratePortfolioButton";
 
 interface Props {
   analysisJson: string;
@@ -115,9 +116,12 @@ export default function PortfolioAIInsights({ analysisJson, stockCount, updatedA
         </div>
       )}
 
-      <p className="text-xs text-gray-400 text-right">
-        Actualizado: {new Date(updatedAt).toLocaleString("es-ES")}
-      </p>
+      <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+        <RegeneratePortfolioButton />
+        <p className="text-xs text-gray-400">
+          Actualizado: {new Date(updatedAt).toLocaleString("es-ES")}
+        </p>
+      </div>
     </div>
   );
 }
