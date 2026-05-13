@@ -5,7 +5,7 @@ import SessionProvider from "@/components/providers/SessionProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "WallStreet – Análisis Bursátil Informativo",
+  title: "My Personal Advisor – Análisis Bursátil Informativo",
   description:
     "Plataforma académica y profesional de análisis bursátil informativo con IA. Solo con fines informativos, no constituye asesoramiento financiero.",
 };
