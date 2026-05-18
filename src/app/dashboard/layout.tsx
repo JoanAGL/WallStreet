@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import LogoutButton from "@/components/dashboard/LogoutButton";
 
 export default async function DashboardLayout({
@@ -17,9 +18,15 @@ export default async function DashboardLayout({
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
           <span className="font-bold text-gray-900">My Personal Advisor</span>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-600">
+            <span className="text-sm text-gray-600 hidden sm:inline">
               {session.user.name ?? session.user.email}
             </span>
+            <Link href="/dashboard/help" className="text-sm text-gray-500 hover:text-gray-700">
+              ¿Cómo funciona?
+            </Link>
+            <Link href="/dashboard/settings" className="text-sm text-gray-500 hover:text-gray-700">
+              Ajustes
+            </Link>
             <LogoutButton />
           </div>
         </div>

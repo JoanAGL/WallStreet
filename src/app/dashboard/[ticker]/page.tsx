@@ -6,6 +6,7 @@ import { findStockByTickerAndUser } from "@/repositories/stockRepository";
 import { getStockHistory } from "@/repositories/analysisHistoryRepository";
 import { HORIZON_LABELS } from "@/types/models";
 import type { InvestmentHorizon } from "@/types/models";
+import PriceChart from "@/components/dashboard/PriceChart";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,22 @@ export default async function TickerHistoryPage({ params }: Props) {
           </p>
         </div>
       ) : (
+        <>
+          {/* Price chart — chronological order (oldest → newest) */}
+          {history.length >= 2 && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                Precio — últimas {history.length} sesiones
+              </p>
+              <PriceChart
+                data={[...history].reverse().map((r) => ({
+                  date:  new Date(r.snapshotAt).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" }),
+                  price: r.price,
+                }))}
+              />
+            </div>
+          )}
+
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -112,6 +129,7 @@ export default async function TickerHistoryPage({ params }: Props) {
             Mostrando los últimos {history.length} registros · máximo 30
           </div>
         </div>
+        </>
       )}
     </div>
   );
