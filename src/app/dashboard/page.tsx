@@ -9,6 +9,8 @@ import UpdateButton from "@/components/dashboard/UpdateButton";
 import Disclaimer from "@/components/ui/Disclaimer";
 import PortfolioSummary from "@/components/dashboard/PortfolioSummary";
 import PortfolioAIInsights from "@/components/dashboard/PortfolioAIInsights";
+import PortfolioBenchmark from "@/components/dashboard/PortfolioBenchmark";
+import TopMovers from "@/components/dashboard/TopMovers";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,8 @@ export default async function DashboardPage() {
 
       <PortfolioSummary stocks={stocks} />
 
+      <PortfolioBenchmark stocks={stocks} />
+
       {portfolioAnalysis && stocksWithAnalysis >= 2 && (
         <PortfolioAIInsights
           analysisJson={portfolioAnalysis.analysisJson}
@@ -59,6 +63,8 @@ export default async function DashboardPage() {
         </p>
         <AddStockForm currentCount={stocks.length} />
       </div>
+
+      <TopMovers />
 
       {stocks.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
