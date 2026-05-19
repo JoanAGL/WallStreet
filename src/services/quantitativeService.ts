@@ -1,5 +1,29 @@
 import { dailyReturns, pearson } from "@/lib/portfolioMath";
 
+// ── Índice Fear & Greed propietario ──────────────────────────────────────────
+// Combina RSI (componente técnico contrarian) y sentimiento noticioso.
+// Rango: 0 (extremo miedo) → 100 (extrema codicia)
+
+export function calculateFearGreedScore(
+  rsi: number,
+  sentiment: "Positivo" | "Neutral" | "Negativo"
+): number {
+  const technicalComponent  = 100 - rsi;  // contrarian: RSI alto = codicia, RSI bajo = miedo
+  const sentimentComponent  =
+    sentiment === "Positivo" ? 90 :
+    sentiment === "Negativo" ? 10 : 50;
+
+  return Math.round(technicalComponent * 0.4 + sentimentComponent * 0.6);
+}
+
+export function fearGreedLabel(score: number): string {
+  if (score >= 75) return "Extrema codicia";
+  if (score >= 55) return "Codicia";
+  if (score >= 45) return "Neutral";
+  if (score >= 25) return "Miedo";
+  return "Extremo miedo";
+}
+
 export interface PortfolioQuantMetrics {
   ticker: string;
   sharpeRatio: number;         // annualized (risk-free 3.5% BCE)

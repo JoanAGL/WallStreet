@@ -19,6 +19,13 @@ const SENTIMENT_COLORS: Record<string, string> = {
   Negativo: "text-red-700 bg-red-50 border-red-200",
 };
 
+const ACTION_STYLES: Record<string, { badge: string; bar: string; label: string }> = {
+  COMPRA:   { badge: "bg-emerald-500 text-white",  bar: "bg-emerald-500",  label: "COMPRA" },
+  VENTA:    { badge: "bg-red-500 text-white",       bar: "bg-red-500",      label: "VENTA" },
+  REDUCIR:  { badge: "bg-amber-500 text-white",     bar: "bg-amber-500",    label: "REDUCIR" },
+  MANTENER: { badge: "bg-gray-400 text-white",      bar: "bg-gray-400",     label: "MANTENER" },
+};
+
 const AI_UNAVAILABLE_JUSTIFICATION = "El análisis automático no está disponible en este momento.";
 
 function fmt(n: number | null, decimals = 2): string {
@@ -129,6 +136,12 @@ export default function StockCard({ stock }: Props) {
   const displayKeyMetrics: string[] = horizonAI?.keyMetrics
     ?? (() => { try { return a?.keyMetrics ? JSON.parse(a.keyMetrics) as string[] : []; } catch { return []; } })();
 
+  const displayPortfolioAlert = horizonAI?.portfolioAlert ?? "";
+  const prescriptiveAction    = horizonAI?.prescriptiveAction ?? null;
+  const actionStyle           = prescriptiveAction
+    ? (ACTION_STYLES[prescriptiveAction.action] ?? ACTION_STYLES["MANTENER"])
+    : null;
+
   const riskLevel = a && !isPartialAnalysis
     ? calculateRiskLevel(a.rsi14, displayScenarioLabel, a.newsSentiment)
     : null;
@@ -166,6 +179,51 @@ export default function StockCard({ stock }: Props) {
 
       {/* Horizon selector */}
       <HorizonSelector ticker={stock.ticker} current={horizon} />
+
+      {/* Señal algorítmica */}
+      {prescriptiveAction && prescriptiveAction.confidenceScore > 0 && actionStyle && (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className={`px-2.5 py-1 rounded-full text-xs font-bold tracking-wide ${actionStyle.badge}`}>
+                {actionStyle.label}
+              </span>
+              {prescriptiveAction.executionPriceLimit > 0 && (
+                <span className="text-xs text-gray-500">
+                  Nivel ref. <span className="font-semibold text-gray-700">${prescriptiveAction.executionPriceLimit.toFixed(2)}</span>
+                </span>
+              )}
+            </div>
+            <span className="text-xs text-gray-400">
+              ~{prescriptiveAction.estimatedHorizonDays}d
+            </span>
+          </div>
+
+          {/* Barra de confianza */}
+          <div className="space-y-0.5">
+            <div className="flex items-center justify-between text-xs text-gray-500">
+              <span>Confianza algorítmica</span>
+              <span className="font-medium text-gray-700">{prescriptiveAction.confidenceScore}%</span>
+            </div>
+            <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${actionStyle.bar}`}
+                style={{ width: `${prescriptiveAction.confidenceScore}%` }}
+              />
+            </div>
+          </div>
+
+          {prescriptiveAction.quantitativeJustification && (
+            <p className="text-xs text-gray-600 leading-relaxed">
+              {prescriptiveAction.quantitativeJustification}
+            </p>
+          )}
+
+          <p className="text-xs text-gray-400 italic">
+            Proyección algorítmica informativa — no constituye asesoramiento financiero.
+          </p>
+        </div>
+      )}
 
       {!a && (
         <p className="text-sm text-gray-500 italic">
@@ -228,6 +286,13 @@ export default function StockCard({ stock }: Props) {
                 <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
                   <span className="font-semibold">Encaje con {HORIZON_LABELS[horizon]}:</span>{" "}
                   {displayHorizonMatch}
+                </div>
+              )}
+
+              {/* Alerta de solapamiento de cartera */}
+              {displayPortfolioAlert && (
+                <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800">
+                  <span className="font-semibold">Riesgo de cartera:</span>{" "}{displayPortfolioAlert}
                 </div>
               )}
 

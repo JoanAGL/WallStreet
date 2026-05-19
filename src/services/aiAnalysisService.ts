@@ -4,6 +4,7 @@ import type { NewsAnalysis, Sentiment } from "./newsAnalysisService";
 import type { FundamentalMetrics, MediumTermFundamentals, LongTermFundamentals, AllFundamentals } from "@/lib/yahooFinanceClient";
 import type { InvestmentHorizon } from "@/types/models";
 import type { PortfolioQuantMetrics } from "./quantitativeService";
+import type { TradingAction } from "@/types/models";
 
 export interface StockScenario {
   label: "Positivo" | "Neutral" | "Negativo";
@@ -216,6 +217,14 @@ export async function generateStockAnalysis(
 
 // ── Multi-horizonte en una sola llamada ───────────────────────────────────────
 
+export interface PrescriptiveAction {
+  action: TradingAction;
+  confidenceScore: number;       // 0–100
+  executionPriceLimit: number;   // nivel técnico de referencia (no garantizado)
+  quantitativeJustification: string;
+  estimatedHorizonDays: number;
+}
+
 export interface HorizonAnalysis {
   analysisText: string;
   scenarioLabel: "Positivo" | "Neutral" | "Negativo";
@@ -223,7 +232,8 @@ export interface HorizonAnalysis {
   divergenceAlert: boolean;
   horizonMatch: string;
   keyMetrics: string[];
-  portfolioAlert: string;  // diversification risk vs the rest of the portfolio
+  portfolioAlert: string;
+  prescriptiveAction: PrescriptiveAction;
 }
 
 export interface AllHorizonsAIAnalysis {
@@ -240,16 +250,24 @@ const FALLBACK_HORIZON: HorizonAnalysis = {
   horizonMatch:         "",
   keyMetrics:           [],
   portfolioAlert:       "",
+  prescriptiveAction: {
+    action:                  "MANTENER",
+    confidenceScore:         0,
+    executionPriceLimit:     0,
+    quantitativeJustification: "Datos insuficientes para generar una proyección.",
+    estimatedHorizonDays:    0,
+  },
 };
 
-// Institutional system instruction — role, constraints, and language policy.
-// Kept separate from user prompt to avoid saturating the context window.
+// Institutional system instruction — role, output contract, language policy.
+// Constraints are framed as algorithmic-projection guidelines, not prohibitions on signals.
 const SYSTEM_INSTRUCTION_ALL =
-  "Eres un agente de análisis financiero institucional al nivel de un Robo-Advisor cuantitativo. " +
-  "Tu enfoque es puramente analítico, descriptivo y basado en datos matemáticos. " +
-  "Reglas absolutas: (1) Está terminantemente prohibido emitir recomendaciones de compra, venta o asesoramiento financiero directo. " +
-  "(2) No hagas proyecciones de precio. " +
-  "(3) Tu lenguaje debe ser sobrio, preciso y en castellano. " +
+  "Eres un motor de análisis cuantitativo financiero automatizado al nivel de un Robo-Advisor institucional. " +
+  "Tu función es generar proyecciones algorítmicas informativas basadas exclusivamente en datos matemáticos de mercado. " +
+  "Reglas absolutas: " +
+  "(1) Las señales de acción (COMPRA/VENTA/MANTENER/REDUCIR) son proyecciones algorítmicas informativas que NO constituyen asesoramiento financiero personalizado. " +
+  "(2) El executionPriceLimit es un nivel técnico de referencia, no un precio garantizado. " +
+  "(3) Tu lenguaje debe ser sobrio, técnico y en castellano. " +
   "(4) Responde únicamente con JSON válido, sin texto adicional ni markdown.";
 
 function formatQuantBlock(q: PortfolioQuantMetrics): string {
@@ -275,7 +293,8 @@ function buildAllHorizonsPrompt(
   newsSummary: string,
   newsSentiment: Sentiment,
   riskProfile?: string | null,
-  quantMetrics?: PortfolioQuantMetrics | null
+  quantMetrics?: PortfolioQuantMetrics | null,
+  fearGreedScore?: number | null
 ): string {
   const m = allFundamentals.medium;
   const l = allFundamentals.long;
@@ -288,55 +307,98 @@ function buildAllHorizonsPrompt(
     ? `\nMétricas cuantitativas de portafolio (Robo-Advisor): ${formatQuantBlock(quantMetrics)}`
     : "";
 
+  const fgCtx = fearGreedScore != null
+    ? `\nÍndice Fear & Greed propietario: ${fearGreedScore}/100 (0=extremo miedo, 100=extrema codicia).`
+    : "";
+
   const highCorrPairs = quantMetrics?.correlatedTickers.filter((c) => Math.abs(c.correlationFactor) > 0.75) ?? [];
   const diversAlert = highCorrPairs.length > 0
     ? `\nAlerta de diversificación: ${ticker} tiene correlación >0.75 con ${highCorrPairs.map((c) => c.ticker).join(", ")}.`
     : "";
 
-  return `Efectúa un diagnóstico de riesgo multi-horizonte para el activo [${ticker}].
-Fecha: ${getTemporalContext()}.${riskCtx}${quantCtx}${diversAlert}
+  return `Efectúa un diagnóstico de riesgo multi-horizonte y genera señales algorítmicas para el activo [${ticker}].
+Fecha: ${getTemporalContext()}.${riskCtx}${quantCtx}${fgCtx}${diversAlert}
 
 Datos de mercado:
-- Precio: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
+- Precio actual: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
 - Noticias (48h): ${newsSummary} | Sentimiento: ${newsSentiment}
 
 Indicadores técnicos (Corto Plazo): ${formatTechnicalBlock(indicators)}
 Métricas fundamentales (Medio Plazo): ${formatMediumBlock(m)}
 Métricas de valor (Largo Plazo): ${formatLongBlock(l)}
 
-Genera el siguiente JSON:
+Genera el siguiente JSON con proyecciones algorítmicas por horizonte:
 {
   "shortTerm": {
-    "analysisText": "3-4 oraciones. Prioriza RSI, volatilidad y sentimiento de noticias.",
+    "analysisText": "3-4 oraciones. Prioriza RSI, Fear&Greed, volatilidad y noticias.",
     "scenarioLabel": "Positivo|Neutral|Negativo",
     "scenarioJustification": "Una oración para el corto plazo.",
     "divergenceAlert": true|false,
-    "horizonMatch": "Por qué encaja o no para trading de corto plazo.",
+    "horizonMatch": "Encaje del activo para trading de corto plazo.",
     "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
-    "portfolioAlert": "Riesgo de diversificación para este activo en el portafolio actual."
+    "portfolioAlert": "Riesgo de diversificación vs resto de cartera. Cadena vacía si no hay riesgo.",
+    "prescriptiveAction": {
+      "action": "COMPRA|VENTA|MANTENER|REDUCIR",
+      "confidenceScore": 0-100,
+      "executionPriceLimit": precio_técnico_de_referencia,
+      "quantitativeJustification": "1-2 oraciones basadas en indicadores técnicos y Fear&Greed.",
+      "estimatedHorizonDays": 5-30
+    }
   },
   "mediumTerm": {
     "analysisText": "3-4 oraciones. Prioriza Sharpe, crecimiento operativo y correlaciones.",
     "scenarioLabel": "Positivo|Neutral|Negativo",
     "scenarioJustification": "Una oración para el medio plazo.",
     "divergenceAlert": true|false,
-    "horizonMatch": "Por qué encaja o no para inversión de medio plazo.",
+    "horizonMatch": "Encaje del activo para inversión de medio plazo.",
     "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
-    "portfolioAlert": "Riesgo de diversificación para este activo en el portafolio actual."
+    "portfolioAlert": "Riesgo de diversificación vs resto de cartera. Cadena vacía si no hay riesgo.",
+    "prescriptiveAction": {
+      "action": "COMPRA|VENTA|MANTENER|REDUCIR",
+      "confidenceScore": 0-100,
+      "executionPriceLimit": precio_técnico_de_referencia,
+      "quantitativeJustification": "1-2 oraciones basadas en fundamentales y Sharpe.",
+      "estimatedHorizonDays": 90-365
+    }
   },
   "longTerm": {
-    "analysisText": "3-4 oraciones. Prioriza Sharpe, FCF, moat y correlaciones de largo plazo.",
+    "analysisText": "3-4 oraciones. Prioriza FCF, moat, dividendos y Sharpe anualizado.",
     "scenarioLabel": "Positivo|Neutral|Negativo",
     "scenarioJustification": "Una oración para el largo plazo.",
     "divergenceAlert": true|false,
-    "horizonMatch": "Por qué encaja o no para inversión de largo plazo.",
+    "horizonMatch": "Encaje del activo para inversión de largo plazo.",
     "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
-    "portfolioAlert": "Riesgo de diversificación para este activo en el portafolio actual."
+    "portfolioAlert": "Riesgo de diversificación vs resto de cartera. Cadena vacía si no hay riesgo.",
+    "prescriptiveAction": {
+      "action": "COMPRA|VENTA|MANTENER|REDUCIR",
+      "confidenceScore": 0-100,
+      "executionPriceLimit": precio_técnico_de_referencia,
+      "quantitativeJustification": "1-2 oraciones basadas en valor intrínseco y FCF.",
+      "estimatedHorizonDays": 365-1825
+    }
   }
 }
 
-divergenceAlert: true si técnicos y sentimiento noticioso apuntan en direcciones opuestas.
-portfolioAlert: menciona si la correlación con otros activos pone en riesgo la diversificación (con qué tickers y por qué). Si no hay riesgo, devuelve cadena vacía.`;
+divergenceAlert: true si técnicos y sentimiento apuntan en direcciones opuestas.
+confidenceScore: 0-100 basado en la convergencia de señales cuantitativas. Nunca inventes datos.
+executionPriceLimit: nivel técnico de soporte/resistencia relevante en USD (usa SMA, Fibonacci o niveles de precio).`;
+}
+
+function parsePrescriptiveAction(raw: unknown): PrescriptiveAction {
+  if (!raw || typeof raw !== "object") return FALLBACK_HORIZON.prescriptiveAction;
+  const r = raw as Record<string, unknown>;
+  const validActions: TradingAction[] = ["COMPRA", "VENTA", "MANTENER", "REDUCIR"];
+  const action = validActions.includes(r.action as TradingAction)
+    ? (r.action as TradingAction)
+    : "MANTENER";
+  return {
+    action,
+    confidenceScore:         typeof r.confidenceScore === "number" ? Math.min(100, Math.max(0, Math.round(r.confidenceScore))) : 0,
+    executionPriceLimit:     typeof r.executionPriceLimit === "number" ? r.executionPriceLimit : 0,
+    quantitativeJustification: typeof r.quantitativeJustification === "string" && r.quantitativeJustification.trim()
+                               ? r.quantitativeJustification : FALLBACK_HORIZON.prescriptiveAction.quantitativeJustification,
+    estimatedHorizonDays:    typeof r.estimatedHorizonDays === "number" ? r.estimatedHorizonDays : 0,
+  };
 }
 
 function parseHorizonBlock(raw: Record<string, unknown> | undefined): HorizonAnalysis {
@@ -355,6 +417,7 @@ function parseHorizonBlock(raw: Record<string, unknown> | undefined): HorizonAna
                              ? raw.keyMetrics.filter((k): k is string => typeof k === "string")
                              : [],
     portfolioAlert:        typeof raw.portfolioAlert === "string" ? raw.portfolioAlert : "",
+    prescriptiveAction:    parsePrescriptiveAction(raw.prescriptiveAction),
   };
 }
 
@@ -366,12 +429,13 @@ export async function generateAllHorizonsAnalysis(
   newsAnalysis: NewsAnalysis,
   allFundamentals: AllFundamentals,
   riskProfile?: string | null,
-  quantMetrics?: PortfolioQuantMetrics | null
+  quantMetrics?: PortfolioQuantMetrics | null,
+  fearGreedScore?: number | null
 ): Promise<AllHorizonsAIAnalysis> {
   const prompt = buildAllHorizonsPrompt(
     ticker, price, changePercent, indicators,
     allFundamentals, newsAnalysis.summary, newsAnalysis.sentiment,
-    riskProfile, quantMetrics
+    riskProfile, quantMetrics, fearGreedScore
   );
 
   const raw = await geminiChat(prompt, 2000, 3, {

@@ -5,6 +5,19 @@
 
 export type InvestmentHorizon = "SHORT_TERM" | "MEDIUM_TERM" | "LONG_TERM";
 
+// ── Señales algorítmicas (proyecciones cuantitativas, no asesoramiento financiero) ──
+
+export type TradingAction = "COMPRA" | "VENTA" | "MANTENER" | "REDUCIR";
+
+export interface AIPrescriptiveAction {
+  ticker: string;
+  action: TradingAction;
+  confidenceScore: number;       // 0–100
+  executionPriceLimit: number;   // nivel técnico de referencia
+  quantitativeJustification: string;
+  estimatedHorizonDays: number;
+}
+
 export const HORIZON_LABELS: Record<InvestmentHorizon, string> = {
   SHORT_TERM:  "Corto Plazo",
   MEDIUM_TERM: "Medio Plazo",

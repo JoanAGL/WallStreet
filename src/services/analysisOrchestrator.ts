@@ -4,7 +4,7 @@ import { analyzeNewsForTicker } from "./newsAnalysisService";
 import type { DataIssue } from "./newsAnalysisService";
 import { generateAllHorizonsAnalysis } from "./aiAnalysisService";
 import type { AllHorizonsAIAnalysis, HorizonAnalysis } from "./aiAnalysisService";
-import { calculatePortfolioQuantMetrics, findTickerMetrics } from "./quantitativeService";
+import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore } from "./quantitativeService";
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import type { AllFundamentals } from "@/lib/yahooFinanceClient";
 import {
@@ -257,9 +257,15 @@ async function runFullAnalysis(
       newsAnalysis = await analyzeNewsForTicker(stock.ticker);
       if (newsAnalysis.dataIssue) dataIssues.push(newsAnalysis.dataIssue);
 
+      // Fear & Greed score computed from RSI + news sentiment
+      const sentiment = newsAnalysis.sentiment as "Positivo" | "Neutral" | "Negativo";
+      const fearGreedScore = indicators.rsi14 != null
+        ? calculateFearGreedScore(indicators.rsi14, sentiment)
+        : null;
+
       const allAI = await generateAllHorizonsAnalysis(
         stock.ticker, quote.price, quote.changePercent,
-        indicators, newsAnalysis, allFundamentals, riskProfile, quantMetrics
+        indicators, newsAnalysis, allFundamentals, riskProfile, quantMetrics, fearGreedScore
       );
       const active = horizonToAI(allAI, horizon);
       const metricsData = buildMetricsData(horizon, indicators, allFundamentals);
