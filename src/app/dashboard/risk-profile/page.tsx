@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 interface Question {
@@ -82,7 +82,6 @@ const RISK_CONFIG: Record<string, { color: string; bg: string; desc: string }> =
 };
 
 export default function RiskProfilePage() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const returnTo = searchParams.get("returnTo") ?? "/dashboard";
 
