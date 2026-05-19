@@ -5,8 +5,8 @@ import type { CorrelationResult } from "@/lib/portfolioMath";
 
 function cellColor(v: number): string {
   if (v >= 1) return "bg-gray-100 text-gray-500";
-  if (v > 0.7) return "bg-red-100 text-red-800 font-semibold";
-  if (v > 0.4) return "bg-yellow-50 text-yellow-800";
+  if (v > 0.75) return "bg-red-100 text-red-800 font-semibold";
+  if (v > 0.4)  return "bg-yellow-50 text-yellow-800";
   return "bg-green-50 text-green-800";
 }
 
@@ -46,7 +46,7 @@ export default function CorrelationMatrix() {
         <div className="flex items-center gap-3 text-xs text-gray-400">
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-200 inline-block" /> Baja (&lt;0.4)</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-yellow-100 inline-block" /> Media</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-100 inline-block" /> Alta (&gt;0.7)</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-100 inline-block" /> Alta (&gt;0.75)</span>
         </div>
       </div>
 
@@ -85,7 +85,7 @@ export default function CorrelationMatrix() {
               key={`${pair.a}-${pair.b}`}
               className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700"
             >
-              ⚠ {pair.a} y {pair.b} altamente correlacionados ({pair.correlation.toFixed(2)}) — considera diversificar
+              ⚠ {pair.a} y {pair.b} correlación {pair.correlation.toFixed(2)} — riesgo de solapamiento, considera diversificar
             </span>
           ))}
         </div>

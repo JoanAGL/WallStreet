@@ -41,7 +41,7 @@ export interface OptimizationResult {
 
 // ── Correlation Matrix (#36) ─────────────────────────────────────────────────
 
-function dailyReturns(closes: number[]): number[] {
+export function dailyReturns(closes: number[]): number[] {
   const ret: number[] = [];
   for (let i = 1; i < closes.length; i++) {
     ret.push((closes[i] - closes[i - 1]) / closes[i - 1]);
@@ -49,7 +49,7 @@ function dailyReturns(closes: number[]): number[] {
   return ret;
 }
 
-function pearson(a: number[], b: number[]): number {
+export function pearson(a: number[], b: number[]): number {
   const n = Math.min(a.length, b.length);
   if (n < 2) return 0;
   const meanA = a.slice(0, n).reduce((s, v) => s + v, 0) / n;
@@ -83,7 +83,7 @@ export function calculateCorrelationMatrix(
   const highPairs: CorrelationResult["highPairs"] = [];
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
-      if (matrix[i][j] > 0.85) {
+      if (matrix[i][j] > 0.75) {
         highPairs.push({ a: tickers[i], b: tickers[j], correlation: matrix[i][j] });
       }
     }

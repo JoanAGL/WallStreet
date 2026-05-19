@@ -3,6 +3,7 @@ import type { TechnicalIndicators } from "./technicalAnalysisService";
 import type { NewsAnalysis, Sentiment } from "./newsAnalysisService";
 import type { FundamentalMetrics, MediumTermFundamentals, LongTermFundamentals, AllFundamentals } from "@/lib/yahooFinanceClient";
 import type { InvestmentHorizon } from "@/types/models";
+import type { PortfolioQuantMetrics } from "./quantitativeService";
 
 export interface StockScenario {
   label: "Positivo" | "Neutral" | "Negativo";
@@ -222,6 +223,7 @@ export interface HorizonAnalysis {
   divergenceAlert: boolean;
   horizonMatch: string;
   keyMetrics: string[];
+  portfolioAlert: string;  // diversification risk vs the rest of the portfolio
 }
 
 export interface AllHorizonsAIAnalysis {
@@ -237,13 +239,32 @@ const FALLBACK_HORIZON: HorizonAnalysis = {
   divergenceAlert:      false,
   horizonMatch:         "",
   keyMetrics:           [],
+  portfolioAlert:       "",
 };
 
+// Institutional system instruction — role, constraints, and language policy.
+// Kept separate from user prompt to avoid saturating the context window.
 const SYSTEM_INSTRUCTION_ALL =
-  "Eres un analista financiero experto en tres estilos de inversión: " +
-  "(1) trading técnico de corto plazo, (2) análisis fundamental de medio plazo y " +
-  "(3) inversión en valor de largo plazo. " +
-  "Responde siempre en español y en formato JSON estricto. Sin recomendaciones de compra/venta.";
+  "Eres un agente de análisis financiero institucional al nivel de un Robo-Advisor cuantitativo. " +
+  "Tu enfoque es puramente analítico, descriptivo y basado en datos matemáticos. " +
+  "Reglas absolutas: (1) Está terminantemente prohibido emitir recomendaciones de compra, venta o asesoramiento financiero directo. " +
+  "(2) No hagas proyecciones de precio. " +
+  "(3) Tu lenguaje debe ser sobrio, preciso y en castellano. " +
+  "(4) Responde únicamente con JSON válido, sin texto adicional ni markdown.";
+
+function formatQuantBlock(q: PortfolioQuantMetrics): string {
+  const corrStr = q.correlatedTickers.length > 0
+    ? q.correlatedTickers
+        .map((c) => `${c.ticker}=${c.correlationFactor.toFixed(2)}`)
+        .join(", ")
+    : "Sin otros activos en cartera";
+  return [
+    `Ratio de Sharpe: ${q.sharpeRatio.toFixed(2)}`,
+    `Volatilidad anualizada (30d): ${q.volatility30d.toFixed(1)}%`,
+    `Peso en cartera: ${q.portfolioWeight.toFixed(1)}%`,
+    `Correlación con cartera: ${corrStr}`,
+  ].join(" | ");
+}
 
 function buildAllHorizonsPrompt(
   ticker: string,
@@ -253,71 +274,87 @@ function buildAllHorizonsPrompt(
   allFundamentals: AllFundamentals,
   newsSummary: string,
   newsSentiment: Sentiment,
-  riskProfile?: string | null
+  riskProfile?: string | null,
+  quantMetrics?: PortfolioQuantMetrics | null
 ): string {
   const m = allFundamentals.medium;
   const l = allFundamentals.long;
+
   const riskCtx = riskProfile
-    ? `\nPerfil de riesgo del inversor: ${riskProfile} — calibra el análisis según esta tolerancia al riesgo.`
+    ? `\nPerfil de riesgo del inversor: ${riskProfile}.`
     : "";
 
-  return `Analiza ${ticker} simultáneamente desde tres horizontes de inversión.
-Fecha: ${getTemporalContext()}.${riskCtx}
-Precio: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
-Noticias (48h): ${newsSummary} | Sentimiento: ${newsSentiment}
+  const quantCtx = quantMetrics
+    ? `\nMétricas cuantitativas de portafolio (Robo-Advisor): ${formatQuantBlock(quantMetrics)}`
+    : "";
+
+  const highCorrPairs = quantMetrics?.correlatedTickers.filter((c) => Math.abs(c.correlationFactor) > 0.75) ?? [];
+  const diversAlert = highCorrPairs.length > 0
+    ? `\nAlerta de diversificación: ${ticker} tiene correlación >0.75 con ${highCorrPairs.map((c) => c.ticker).join(", ")}.`
+    : "";
+
+  return `Efectúa un diagnóstico de riesgo multi-horizonte para el activo [${ticker}].
+Fecha: ${getTemporalContext()}.${riskCtx}${quantCtx}${diversAlert}
+
+Datos de mercado:
+- Precio: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
+- Noticias (48h): ${newsSummary} | Sentimiento: ${newsSentiment}
 
 Indicadores técnicos (Corto Plazo): ${formatTechnicalBlock(indicators)}
 Métricas fundamentales (Medio Plazo): ${formatMediumBlock(m)}
 Métricas de valor (Largo Plazo): ${formatLongBlock(l)}
 
-Responde ÚNICAMENTE con este JSON (sin texto adicional):
+Genera el siguiente JSON:
 {
   "shortTerm": {
-    "analysisText": "3-4 oraciones enfocadas en momentum técnico y volatilidad.",
+    "analysisText": "3-4 oraciones. Prioriza RSI, volatilidad y sentimiento de noticias.",
     "scenarioLabel": "Positivo|Neutral|Negativo",
     "scenarioJustification": "Una oración para el corto plazo.",
     "divergenceAlert": true|false,
     "horizonMatch": "Por qué encaja o no para trading de corto plazo.",
-    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"]
+    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
+    "portfolioAlert": "Riesgo de diversificación para este activo en el portafolio actual."
   },
   "mediumTerm": {
-    "analysisText": "3-4 oraciones enfocadas en crecimiento operativo y eficiencia de capital.",
+    "analysisText": "3-4 oraciones. Prioriza Sharpe, crecimiento operativo y correlaciones.",
     "scenarioLabel": "Positivo|Neutral|Negativo",
     "scenarioJustification": "Una oración para el medio plazo.",
     "divergenceAlert": true|false,
     "horizonMatch": "Por qué encaja o no para inversión de medio plazo.",
-    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"]
+    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
+    "portfolioAlert": "Riesgo de diversificación para este activo en el portafolio actual."
   },
   "longTerm": {
-    "analysisText": "3-4 oraciones enfocadas en valor intrínseco, moat y generación de FCF.",
+    "analysisText": "3-4 oraciones. Prioriza Sharpe, FCF, moat y correlaciones de largo plazo.",
     "scenarioLabel": "Positivo|Neutral|Negativo",
     "scenarioJustification": "Una oración para el largo plazo.",
     "divergenceAlert": true|false,
     "horizonMatch": "Por qué encaja o no para inversión de largo plazo.",
-    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"]
+    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
+    "portfolioAlert": "Riesgo de diversificación para este activo en el portafolio actual."
   }
 }
 
 divergenceAlert: true si técnicos y sentimiento noticioso apuntan en direcciones opuestas.
-keyMetrics: las 3 métricas del bloque correspondiente que más influyen en ese horizonte.
-REGLAS: Sin recomendaciones. Sin proyecciones de precio. Solo análisis informativo.`;
+portfolioAlert: menciona si la correlación con otros activos pone en riesgo la diversificación (con qué tickers y por qué). Si no hay riesgo, devuelve cadena vacía.`;
 }
 
 function parseHorizonBlock(raw: Record<string, unknown> | undefined): HorizonAnalysis {
   if (!raw) return FALLBACK_HORIZON;
   const label = raw.scenarioLabel;
   return {
-    analysisText:         typeof raw.analysisText === "string" && raw.analysisText.trim()
-                            ? raw.analysisText : FALLBACK_HORIZON.analysisText,
-    scenarioLabel:        label === "Positivo" || label === "Negativo" || label === "Neutral"
-                            ? label : "Neutral",
+    analysisText:          typeof raw.analysisText === "string" && raw.analysisText.trim()
+                             ? raw.analysisText : FALLBACK_HORIZON.analysisText,
+    scenarioLabel:         label === "Positivo" || label === "Negativo" || label === "Neutral"
+                             ? label : "Neutral",
     scenarioJustification: typeof raw.scenarioJustification === "string" && raw.scenarioJustification.trim()
-                            ? raw.scenarioJustification : FALLBACK_HORIZON.scenarioJustification,
-    divergenceAlert:      typeof raw.divergenceAlert === "boolean" ? raw.divergenceAlert : false,
-    horizonMatch:         typeof raw.horizonMatch === "string" ? raw.horizonMatch : "",
-    keyMetrics:           Array.isArray(raw.keyMetrics)
-                            ? raw.keyMetrics.filter((k): k is string => typeof k === "string")
-                            : [],
+                             ? raw.scenarioJustification : FALLBACK_HORIZON.scenarioJustification,
+    divergenceAlert:       typeof raw.divergenceAlert === "boolean" ? raw.divergenceAlert : false,
+    horizonMatch:          typeof raw.horizonMatch === "string" ? raw.horizonMatch : "",
+    keyMetrics:            Array.isArray(raw.keyMetrics)
+                             ? raw.keyMetrics.filter((k): k is string => typeof k === "string")
+                             : [],
+    portfolioAlert:        typeof raw.portfolioAlert === "string" ? raw.portfolioAlert : "",
   };
 }
 
@@ -328,12 +365,13 @@ export async function generateAllHorizonsAnalysis(
   indicators: TechnicalIndicators,
   newsAnalysis: NewsAnalysis,
   allFundamentals: AllFundamentals,
-  riskProfile?: string | null
+  riskProfile?: string | null,
+  quantMetrics?: PortfolioQuantMetrics | null
 ): Promise<AllHorizonsAIAnalysis> {
   const prompt = buildAllHorizonsPrompt(
     ticker, price, changePercent, indicators,
     allFundamentals, newsAnalysis.summary, newsAnalysis.sentiment,
-    riskProfile
+    riskProfile, quantMetrics
   );
 
   const raw = await geminiChat(prompt, 2000, 3, {

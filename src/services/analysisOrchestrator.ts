@@ -4,6 +4,7 @@ import { analyzeNewsForTicker } from "./newsAnalysisService";
 import type { DataIssue } from "./newsAnalysisService";
 import { generateAllHorizonsAnalysis } from "./aiAnalysisService";
 import type { AllHorizonsAIAnalysis, HorizonAnalysis } from "./aiAnalysisService";
+import { calculatePortfolioQuantMetrics, findTickerMetrics } from "./quantitativeService";
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import type { AllFundamentals } from "@/lib/yahooFinanceClient";
 import {
@@ -34,7 +35,7 @@ export interface OrchestrationResult {
   dataIssues?: DataIssue[];
 }
 
-type StockInput = { id: string; ticker: string; investmentHorizon?: InvestmentHorizon };
+type StockInput = { id: string; ticker: string; investmentHorizon?: InvestmentHorizon; quantity?: number | null };
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -223,11 +224,34 @@ async function runFullAnalysis(
 
   if (withMarket.length === 0) return finalResults;
 
+  // Phase 2b: Compute portfolio-wide quant metrics using historical data from all stale stocks
+  const quantHistoricalData: Record<string, number[]> = {};
+  const quantCurrentPrices:  Record<string, number>   = {};
+  const quantQuantities:     Record<string, number>   = {};
+  for (const { stock, quote } of withMarket) {
+    quantCurrentPrices[stock.ticker] = quote.price;
+    quantQuantities[stock.ticker]    = stock.quantity ?? 0;
+  }
+  // Fetch historical closes for quant (re-uses Next.js fetch cache from Phase 2)
+  await Promise.allSettled(
+    withMarket.map(async ({ stock }) => {
+      try {
+        const h = await getHistoricalCloses(stock.ticker, 30);
+        if (h.closes.length >= 5) quantHistoricalData[stock.ticker] = h.closes;
+      } catch { /* skip */ }
+    })
+  );
+  const allQuantMetrics = calculatePortfolioQuantMetrics(
+    quantHistoricalData, quantCurrentPrices, quantQuantities
+  );
+
   // Phase 3+4+5: Sequential (Gemini rate limit)
   for (const { stock, quote, indicators, allFundamentals } of withMarket) {
     const horizon: InvestmentHorizon = stock.investmentHorizon ?? "SHORT_TERM";
     let newsAnalysis: Awaited<ReturnType<typeof analyzeNewsForTicker>> | null = null;
     const dataIssues: DataIssue[] = [];
+
+    const quantMetrics = findTickerMetrics(allQuantMetrics, stock.ticker);
 
     try {
       newsAnalysis = await analyzeNewsForTicker(stock.ticker);
@@ -235,7 +259,7 @@ async function runFullAnalysis(
 
       const allAI = await generateAllHorizonsAnalysis(
         stock.ticker, quote.price, quote.changePercent,
-        indicators, newsAnalysis, allFundamentals, riskProfile
+        indicators, newsAnalysis, allFundamentals, riskProfile, quantMetrics
       );
       const active = horizonToAI(allAI, horizon);
       const metricsData = buildMetricsData(horizon, indicators, allFundamentals);

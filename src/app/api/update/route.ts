@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
   // ── Run stock analysis ───────────────────────────────────────────────────
   const typesForStocks = requestedTypes.filter((t) => t !== "portfolio") as UpdateType[];
   const results = await runAnalysisForStocks(
-    stocks.map((s) => ({ id: s.id, ticker: s.ticker, investmentHorizon: s.investmentHorizon })),
+    stocks.map((s) => ({ id: s.id, ticker: s.ticker, investmentHorizon: s.investmentHorizon, quantity: s.quantity })),
     forceUpdate,
     typesForStocks,
     riskProfile

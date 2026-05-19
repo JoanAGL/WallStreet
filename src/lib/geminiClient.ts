@@ -25,6 +25,7 @@ interface GeminiResponse {
 export interface GeminiChatOptions {
   systemInstruction?: string;
   jsonMode?: boolean;
+  temperature?: number;
 }
 
 export async function geminiChat(
@@ -37,10 +38,13 @@ export async function geminiChat(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      // Use lower temperature for JSON mode to ensure strict formatting
+      const temperature = options.temperature ?? (options.jsonMode ? 0.1 : 0.3);
+
       const body: Record<string, unknown> = {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: 0.3,
+          temperature,
           maxOutputTokens: maxTokens,
           ...(options.jsonMode && { response_mime_type: "application/json" }),
         },
