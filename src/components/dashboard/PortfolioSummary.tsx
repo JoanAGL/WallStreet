@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { StockWithAnalysis } from "@/types/models";
 import type { AllHorizonsAIAnalysis } from "@/services/aiAnalysisService";
 
@@ -56,9 +57,17 @@ export default function PortfolioSummary({ stocks }: Props) {
 
   return (
     <div className={`rounded-xl border px-4 py-3 space-y-2 ${overallColor}`}>
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-        Resumen de cartera
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          Resumen de cartera
+        </p>
+        <Link
+          href="/dashboard/simulation"
+          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+        >
+          Monte Carlo &amp; Optimización →
+        </Link>
+      </div>
 
       {/* Scenario distribution + daily change */}
       <div className="flex flex-wrap items-center gap-2">

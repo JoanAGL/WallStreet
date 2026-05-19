@@ -136,6 +136,18 @@ export default function SettingsPage() {
         </form>
       </Section>
 
+      <Section title="Perfil de riesgo">
+        <p className="text-sm text-gray-600">
+          Actualiza tu cuestionario de perfil de inversor para que el análisis de IA se adapte a tu tolerancia al riesgo.
+        </p>
+        <Link
+          href="/dashboard/risk-profile?returnTo=/dashboard/settings"
+          className="inline-block px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          Actualizar perfil de riesgo
+        </Link>
+      </Section>
+
       <Section title="Eliminar cuenta">
         <p className="text-sm text-gray-600">
           Esta acción es <strong>irreversible</strong>. Se eliminarán tu cuenta, todas tus acciones y el historial de análisis.

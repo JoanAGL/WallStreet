@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { getStocksByUser, type PrismaStock } from "@/repositories/stockRepository";
 import { getAnalysesForUser } from "@/repositories/analysisRepository";
 import {
@@ -55,8 +56,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: "Análisis global regenerado.", updatedAt: new Date().toISOString() });
   }
 
-  // ── Load user's stocks ───────────────────────────────────────────────────
-  const allStocks = await getStocksByUser(userId);
+  // ── Load user's stocks + risk profile ──────────────────────────────────
+  const [allStocks, userProfileRow] = await Promise.all([
+    getStocksByUser(userId),
+    prisma.userProfile.findUnique({ where: { userId }, select: { riskLabel: true } }),
+  ]);
+  const riskProfile = userProfileRow?.riskLabel ?? null;
   if (allStocks.length === 0) {
     return NextResponse.json({ error: "No tienes acciones añadidas." }, { status: 400 });
   }
@@ -93,7 +98,8 @@ export async function POST(req: NextRequest) {
   const results = await runAnalysisForStocks(
     stocks.map((s) => ({ id: s.id, ticker: s.ticker, investmentHorizon: s.investmentHorizon })),
     forceUpdate,
-    typesForStocks
+    typesForStocks,
+    riskProfile
   );
 
   // ── Portfolio analysis (auto after AI update with ≥2 stocks) ────────────

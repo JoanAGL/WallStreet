@@ -24,6 +24,17 @@ model User {
 
   stocks            Stock[]
   portfolioAnalysis PortfolioAnalysis?
+  userProfile       UserProfile?
+}
+
+model UserProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  riskScore Int
+  riskLabel String   // "Conservador" | "Moderado" | "Agresivo"
+  answers   String   // JSON with original answers
+  updatedAt DateTime @updatedAt
 }
 
 model PortfolioAnalysis {

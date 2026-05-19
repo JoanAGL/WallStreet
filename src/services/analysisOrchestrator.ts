@@ -54,13 +54,14 @@ export async function runAnalysisForStock(
 export async function runAnalysisForStocks(
   stocks: StockInput[],
   forceUpdate = false,
-  types: UpdateType[] = ["price", "news", "technicals", "ai"]
+  types: UpdateType[] = ["price", "news", "technicals", "ai"],
+  riskProfile?: string | null
 ): Promise<OrchestrationResult[]> {
   if (stocks.length === 0) return [];
 
   // Full AI pipeline
   if (types.includes("ai")) {
-    return runFullAnalysis(stocks, forceUpdate);
+    return runFullAnalysis(stocks, forceUpdate, riskProfile);
   }
 
   // Partial update path (price / news / technicals — no Gemini per-stock call)
@@ -152,7 +153,8 @@ export async function runPortfolioOnlyAnalysis(
 
 async function runFullAnalysis(
   stocks: StockInput[],
-  forceUpdate: boolean
+  forceUpdate: boolean,
+  riskProfile?: string | null
 ): Promise<OrchestrationResult[]> {
   // Phase 1: Freshness check
   const freshnessResults = await Promise.allSettled(
@@ -233,7 +235,7 @@ async function runFullAnalysis(
 
       const allAI = await generateAllHorizonsAnalysis(
         stock.ticker, quote.price, quote.changePercent,
-        indicators, newsAnalysis, allFundamentals
+        indicators, newsAnalysis, allFundamentals, riskProfile
       );
       const active = horizonToAI(allAI, horizon);
       const metricsData = buildMetricsData(horizon, indicators, allFundamentals);

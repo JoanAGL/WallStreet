@@ -252,13 +252,17 @@ function buildAllHorizonsPrompt(
   indicators: TechnicalIndicators,
   allFundamentals: AllFundamentals,
   newsSummary: string,
-  newsSentiment: Sentiment
+  newsSentiment: Sentiment,
+  riskProfile?: string | null
 ): string {
   const m = allFundamentals.medium;
   const l = allFundamentals.long;
+  const riskCtx = riskProfile
+    ? `\nPerfil de riesgo del inversor: ${riskProfile} — calibra el análisis según esta tolerancia al riesgo.`
+    : "";
 
   return `Analiza ${ticker} simultáneamente desde tres horizontes de inversión.
-Fecha: ${getTemporalContext()}.
+Fecha: ${getTemporalContext()}.${riskCtx}
 Precio: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
 Noticias (48h): ${newsSummary} | Sentimiento: ${newsSentiment}
 
@@ -323,11 +327,13 @@ export async function generateAllHorizonsAnalysis(
   changePercent: number,
   indicators: TechnicalIndicators,
   newsAnalysis: NewsAnalysis,
-  allFundamentals: AllFundamentals
+  allFundamentals: AllFundamentals,
+  riskProfile?: string | null
 ): Promise<AllHorizonsAIAnalysis> {
   const prompt = buildAllHorizonsPrompt(
     ticker, price, changePercent, indicators,
-    allFundamentals, newsAnalysis.summary, newsAnalysis.sentiment
+    allFundamentals, newsAnalysis.summary, newsAnalysis.sentiment,
+    riskProfile
   );
 
   const raw = await geminiChat(prompt, 2000, 3, {

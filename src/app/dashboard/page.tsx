@@ -11,6 +11,8 @@ import PortfolioSummary from "@/components/dashboard/PortfolioSummary";
 import PortfolioAIInsights from "@/components/dashboard/PortfolioAIInsights";
 import PortfolioBenchmark from "@/components/dashboard/PortfolioBenchmark";
 import TopMovers from "@/components/dashboard/TopMovers";
+import CorrelationMatrix from "@/components/dashboard/CorrelationMatrix";
+import TaxHarvestingPanel from "@/components/dashboard/TaxHarvestingPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +50,10 @@ export default async function DashboardPage() {
       <PortfolioSummary stocks={stocks} />
 
       <PortfolioBenchmark stocks={stocks} />
+
+      <TaxHarvestingPanel stocks={stocks} />
+
+      {stocksWithAnalysis >= 2 && <CorrelationMatrix />}
 
       {portfolioAnalysis && stocksWithAnalysis >= 2 && (
         <PortfolioAIInsights

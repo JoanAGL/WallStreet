@@ -3,6 +3,8 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import LogoutButton from "@/components/dashboard/LogoutButton";
+import RiskProfileBadge from "@/components/dashboard/RiskProfileBadge";
+import { prisma } from "@/lib/prisma";
 
 export default async function DashboardLayout({
   children,
@@ -11,6 +13,11 @@ export default async function DashboardLayout({
 }) {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
+
+  const userProfile = await prisma.userProfile.findUnique({
+    where: { userId: session.user.id },
+    select: { riskLabel: true },
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -21,6 +28,10 @@ export default async function DashboardLayout({
             <span className="text-sm text-gray-600 hidden sm:inline">
               {session.user.name ?? session.user.email}
             </span>
+            <RiskProfileBadge riskLabel={userProfile?.riskLabel ?? null} />
+            <Link href="/dashboard/simulation" className="text-sm text-gray-500 hover:text-gray-700 hidden sm:inline">
+              Simulación
+            </Link>
             <Link href="/dashboard/help" className="text-sm text-gray-500 hover:text-gray-700">
               ¿Cómo funciona?
             </Link>
