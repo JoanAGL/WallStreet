@@ -5,6 +5,8 @@ import type { DataIssue } from "./newsAnalysisService";
 import { generateAllHorizonsAnalysis } from "./aiAnalysisService";
 import type { AllHorizonsAIAnalysis, HorizonAnalysis } from "./aiAnalysisService";
 import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore } from "./quantitativeService";
+import { getGlobalContext } from "./macroService";
+import type { MacroGlobalContext } from "./macroService";
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import type { AllFundamentals } from "@/lib/yahooFinanceClient";
 import {
@@ -224,6 +226,14 @@ async function runFullAnalysis(
 
   if (withMarket.length === 0) return finalResults;
 
+  // Phase 2c: Fetch macro context once (4h cache — no extra latency on cache hit)
+  let macroContext: MacroGlobalContext | null = null;
+  try {
+    macroContext = await getGlobalContext();
+  } catch (err) {
+    console.warn("[ORCHESTRATOR] MacroService failed, continuing without macro context:", err);
+  }
+
   // Phase 2b: Compute portfolio-wide quant metrics using historical data from all stale stocks
   const quantHistoricalData: Record<string, number[]> = {};
   const quantCurrentPrices:  Record<string, number>   = {};
@@ -265,7 +275,7 @@ async function runFullAnalysis(
 
       const allAI = await generateAllHorizonsAnalysis(
         stock.ticker, quote.price, quote.changePercent,
-        indicators, newsAnalysis, allFundamentals, riskProfile, quantMetrics, fearGreedScore
+        indicators, newsAnalysis, allFundamentals, riskProfile, quantMetrics, fearGreedScore, macroContext
       );
       const active = horizonToAI(allAI, horizon);
       const metricsData = buildMetricsData(horizon, indicators, allFundamentals);

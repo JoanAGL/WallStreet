@@ -11,6 +11,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { ticker: string } }
 ) {
+  const ticker = params.ticker.toUpperCase().trim();
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
@@ -26,7 +27,7 @@ export async function PATCH(
     if (typeof body.investmentHorizon !== "string") {
       return NextResponse.json({ error: "Campo investmentHorizon inválido." }, { status: 400 });
     }
-    const result = await updateUserStockHorizon(params.ticker, session.user.id, body.investmentHorizon);
+    const result = await updateUserStockHorizon(ticker, session.user.id, body.investmentHorizon);
     if (!result.success) return NextResponse.json({ error: result.error }, { status: result.status });
     return NextResponse.json(result.data);
   }
@@ -49,7 +50,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Cantidad inválida." }, { status: 400 });
     }
 
-    const result = await updateUserStockPurchaseData(params.ticker, session.user.id, {
+    const result = await updateUserStockPurchaseData(ticker, session.user.id, {
       purchasePrice,
       quantity,
       purchaseDate,
@@ -65,12 +66,13 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { ticker: string } }
 ) {
+  const ticker = params.ticker.toUpperCase().trim();
   const session = await getServerSession(authOptions);
   if (!session) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const result = await removeUserStock(params.ticker, session.user.id);
+  const result = await removeUserStock(ticker, session.user.id);
 
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: result.status });

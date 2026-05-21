@@ -5,6 +5,7 @@ import type { FundamentalMetrics, MediumTermFundamentals, LongTermFundamentals, 
 import type { InvestmentHorizon } from "@/types/models";
 import type { PortfolioQuantMetrics } from "./quantitativeService";
 import type { TradingAction } from "@/types/models";
+import type { MacroGlobalContext } from "./macroService";
 
 export interface StockScenario {
   label: "Positivo" | "Neutral" | "Negativo";
@@ -284,6 +285,15 @@ function formatQuantBlock(q: PortfolioQuantMetrics): string {
   ].join(" | ");
 }
 
+function formatMacroBlock(macro: MacroGlobalContext): string {
+  if (macro.items.length === 0) return "";
+  const lines = macro.items.map((item) => {
+    const sectors = item.affectedSectors.length > 0 ? ` [${item.affectedSectors.join(", ")}]` : "";
+    return `  • [${item.impactLevel}]${sectors} ${item.title}`;
+  });
+  return `\nContexto macroeconómico global (últimas 24h):\n${lines.join("\n")}`;
+}
+
 function buildAllHorizonsPrompt(
   ticker: string,
   price: number,
@@ -294,7 +304,8 @@ function buildAllHorizonsPrompt(
   newsSentiment: Sentiment,
   riskProfile?: string | null,
   quantMetrics?: PortfolioQuantMetrics | null,
-  fearGreedScore?: number | null
+  fearGreedScore?: number | null,
+  macroContext?: MacroGlobalContext | null
 ): string {
   const m = allFundamentals.medium;
   const l = allFundamentals.long;
@@ -316,8 +327,13 @@ function buildAllHorizonsPrompt(
     ? `\nAlerta de diversificación: ${ticker} tiene correlación >0.75 con ${highCorrPairs.map((c) => c.ticker).join(", ")}.`
     : "";
 
+  const macroCtx = macroContext ? formatMacroBlock(macroContext) : "";
+  const macroInstruction = macroContext && macroContext.items.some((i) => i.impactLevel === "HIGH")
+    ? "\nINSTRUCCIÓN MACRO: Hay eventos macroeconómicos de impacto HIGH activos. Reduce el confidenceScore en señales COMPRA y aumenta el peso de riesgos en el análisis."
+    : "";
+
   return `Efectúa un diagnóstico de riesgo multi-horizonte y genera señales algorítmicas para el activo [${ticker}].
-Fecha: ${getTemporalContext()}.${riskCtx}${quantCtx}${fgCtx}${diversAlert}
+Fecha: ${getTemporalContext()}.${riskCtx}${quantCtx}${fgCtx}${diversAlert}${macroCtx}${macroInstruction}
 
 Datos de mercado:
 - Precio actual: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
@@ -430,12 +446,13 @@ export async function generateAllHorizonsAnalysis(
   allFundamentals: AllFundamentals,
   riskProfile?: string | null,
   quantMetrics?: PortfolioQuantMetrics | null,
-  fearGreedScore?: number | null
+  fearGreedScore?: number | null,
+  macroContext?: MacroGlobalContext | null
 ): Promise<AllHorizonsAIAnalysis> {
   const prompt = buildAllHorizonsPrompt(
     ticker, price, changePercent, indicators,
     allFundamentals, newsAnalysis.summary, newsAnalysis.sentiment,
-    riskProfile, quantMetrics, fearGreedScore
+    riskProfile, quantMetrics, fearGreedScore, macroContext
   );
 
   const raw = await geminiChat(prompt, 2000, 3, {

@@ -28,10 +28,14 @@ export interface NewsAnalysis {
   dataIssue?: DataIssue;
 }
 
+function sanitize(s: string): string {
+  return s.replace(/["\\\n\r]/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function normalizeArticle(raw: RawNewsArticle): NewsArticle {
   return {
-    title: raw.title,
-    description: raw.description ?? "",
+    title: sanitize(raw.title),
+    description: sanitize(raw.description ?? ""),
     url: raw.url,
     publishedAt: raw.publishedAt,
     source: raw.source.name,
