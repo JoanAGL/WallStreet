@@ -1,9 +1,10 @@
 import { geminiChat } from "@/lib/geminiClient";
+import { cacheGet, cacheSet } from "@/lib/cacheStore";
 import type { EarningsGuidanceInsight, GuidanceSentiment, EpsGuidanceStatus } from "@/types/financial";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days — one per fiscal quarter
+const CACHE_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days — one inference per fiscal quarter
 
 const VALID_SENTIMENTS: GuidanceSentiment[] = ["EXPANSIVO", "PRUDENTE", "CONTRACTIVO"];
 const VALID_EPS_STATUSES: EpsGuidanceStatus[] = ["UPWARD", "DOWNWARD", "STABLE"];
@@ -16,15 +17,6 @@ const SYSTEM_INSTRUCTION =
   "(1) Los datos son proyecciones inferenciales, no asesoramiento financiero personalizado. " +
   "(2) Si no dispones de datos suficientes para un campo, usa valores conservadores (PRUDENTE / STABLE / null). " +
   "(3) Responde únicamente con JSON válido, sin texto adicional ni markdown.";
-
-// ── Cache ─────────────────────────────────────────────────────────────────────
-
-interface CacheEntry {
-  data: EarningsGuidanceInsight;
-  expiresAt: number;
-}
-
-const _cache = new Map<string, CacheEntry>();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -78,7 +70,9 @@ function parseGuidance(raw: string, quarter: string): EarningsGuidanceInsight {
     ? (parsed.sentiment as GuidanceSentiment)
     : "PRUDENTE";
 
-  const epsGuidanceStatus: EpsGuidanceStatus = VALID_EPS_STATUSES.includes(parsed.epsGuidanceStatus as EpsGuidanceStatus)
+  const epsGuidanceStatus: EpsGuidanceStatus = VALID_EPS_STATUSES.includes(
+    parsed.epsGuidanceStatus as EpsGuidanceStatus
+  )
     ? (parsed.epsGuidanceStatus as EpsGuidanceStatus)
     : "STABLE";
 
@@ -111,7 +105,7 @@ function parseGuidance(raw: string, quarter: string): EarningsGuidanceInsight {
 export class EarningsService {
   /**
    * Returns the earnings guidance insight for a given ticker.
-   * Results are cached 30 days per fiscal quarter — Gemini is only called once per ticker/quarter.
+   * Cached 30 days in Supabase (CacheEntry) — Gemini is only called once per ticker/quarter.
    * Falls back to structured mock data when GEMINI_API_KEY is not configured (dev environments).
    */
   static async getGuidanceInsight(ticker: string): Promise<EarningsGuidanceInsight> {
@@ -122,12 +116,9 @@ export class EarningsService {
       return buildFallback(quarter);
     }
 
-    const cacheKey = `${normalized}::${quarter}`;
-    const now = Date.now();
-    const cached = _cache.get(cacheKey);
-    if (cached && now < cached.expiresAt) {
-      return cached.data;
-    }
+    const cacheKey = `earnings::${normalized}::${quarter}`;
+    const cached = await cacheGet<EarningsGuidanceInsight>(cacheKey);
+    if (cached) return cached;
 
     const prompt = buildPrompt(normalized, quarter);
 
@@ -139,7 +130,7 @@ export class EarningsService {
       });
 
       const data = parseGuidance(raw, quarter);
-      _cache.set(cacheKey, { data, expiresAt: now + CACHE_TTL_MS });
+      await cacheSet(cacheKey, data, CACHE_TTL_SECONDS);
       return data;
     } catch (err) {
       console.error(`[EarningsService] Gemini inference failed for ${normalized}:`, err);

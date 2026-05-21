@@ -1,9 +1,12 @@
 import { geminiChat } from "@/lib/geminiClient";
+import { cacheGet, cacheSet } from "@/lib/cacheStore";
 
 const NEWS_API_BASE = "https://newsapi.org/v2/everything";
 const MACRO_QUERY =
   'inflation OR "interest rates" OR recession OR "Federal Reserve" OR ECB OR geopolitical OR tariffs OR GDP OR "central bank" OR "market crash"';
-const CACHE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+const CACHE_KEY = "macro::global";
+const CACHE_TTL_SECONDS = 4 * 60 * 60; // 4 hours
 
 export type ImpactLevel = "HIGH" | "MEDIUM" | "LOW";
 
@@ -27,13 +30,6 @@ interface RawArticle {
   publishedAt: string;
   source: { name: string };
 }
-
-interface CacheEntry {
-  data: MacroGlobalContext;
-  expiresAt: number;
-}
-
-let _cache: CacheEntry | null = null;
 
 const VALID_LEVELS: ImpactLevel[] = ["HIGH", "MEDIUM", "LOW"];
 
@@ -157,11 +153,10 @@ async function fetchAndClassify(): Promise<MacroGlobalContext> {
 }
 
 export async function getGlobalContext(): Promise<MacroGlobalContext> {
-  const now = Date.now();
-  if (_cache && now < _cache.expiresAt) {
-    return _cache.data;
-  }
+  const cached = await cacheGet<MacroGlobalContext>(CACHE_KEY);
+  if (cached) return cached;
+
   const data = await fetchAndClassify();
-  _cache = { data, expiresAt: now + CACHE_TTL_MS };
+  await cacheSet(CACHE_KEY, data, CACHE_TTL_SECONDS);
   return data;
 }

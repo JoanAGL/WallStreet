@@ -104,3 +104,12 @@ model StockAnalysisHistory {
 
   @@index([stockId, snapshotAt(sort: Desc)])
 }
+
+// Shared persistent cache for cross-request data (macro context, earnings guidance).
+// Replaces in-memory Map caches that reset on every Vercel serverless invocation.
+model CacheEntry {
+  key       String   @id        // e.g. "macro::global", "earnings::AAPL::Q2 2025"
+  value     String              // JSON-serialized payload
+  expiresAt DateTime
+  updatedAt DateTime @updatedAt
+}

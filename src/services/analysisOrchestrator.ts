@@ -7,6 +7,8 @@ import type { AllHorizonsAIAnalysis, HorizonAnalysis } from "./aiAnalysisService
 import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore } from "./quantitativeService";
 import { getGlobalContext } from "./macroService";
 import type { MacroGlobalContext } from "./macroService";
+import { EarningsService } from "./earningsService";
+import type { EarningsGuidanceInsight } from "@/types/financial";
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import type { AllFundamentals } from "@/lib/yahooFinanceClient";
 import {
@@ -255,16 +257,24 @@ async function runFullAnalysis(
     quantHistoricalData, quantCurrentPrices, quantQuantities
   );
 
-  // Phase 3+4+5: Sequential (Gemini rate limit)
+  // Phase 3+4+5: Sequential Gemini calls, but per-stock I/O is parallelized
   for (const { stock, quote, indicators, allFundamentals } of withMarket) {
     const horizon: InvestmentHorizon = stock.investmentHorizon ?? "SHORT_TERM";
     let newsAnalysis: Awaited<ReturnType<typeof analyzeNewsForTicker>> | null = null;
+    let earningsGuidance: EarningsGuidanceInsight | null = null;
     const dataIssues: DataIssue[] = [];
 
     const quantMetrics = findTickerMetrics(allQuantMetrics, stock.ticker);
 
     try {
-      newsAnalysis = await analyzeNewsForTicker(stock.ticker);
+      // Fetch news and earnings guidance in parallel — both are cached, low latency
+      [newsAnalysis, earningsGuidance] = await Promise.all([
+        analyzeNewsForTicker(stock.ticker),
+        EarningsService.getGuidanceInsight(stock.ticker).catch((err) => {
+          console.warn(`[ORCHESTRATOR] EarningsService failed for ${stock.ticker}:`, err);
+          return null;
+        }),
+      ]);
       if (newsAnalysis.dataIssue) dataIssues.push(newsAnalysis.dataIssue);
 
       // Fear & Greed score computed from RSI + news sentiment
@@ -275,7 +285,8 @@ async function runFullAnalysis(
 
       const allAI = await generateAllHorizonsAnalysis(
         stock.ticker, quote.price, quote.changePercent,
-        indicators, newsAnalysis, allFundamentals, riskProfile, quantMetrics, fearGreedScore, macroContext
+        indicators, newsAnalysis, allFundamentals,
+        riskProfile, quantMetrics, fearGreedScore, macroContext, earningsGuidance
       );
       const active = horizonToAI(allAI, horizon);
       const metricsData = buildMetricsData(horizon, indicators, allFundamentals);

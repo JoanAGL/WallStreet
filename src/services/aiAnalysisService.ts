@@ -6,6 +6,7 @@ import type { InvestmentHorizon } from "@/types/models";
 import type { PortfolioQuantMetrics } from "./quantitativeService";
 import type { TradingAction } from "@/types/models";
 import type { MacroGlobalContext } from "./macroService";
+import type { EarningsGuidanceInsight } from "@/types/financial";
 
 export interface StockScenario {
   label: "Positivo" | "Neutral" | "Negativo";
@@ -285,13 +286,53 @@ function formatQuantBlock(q: PortfolioQuantMetrics): string {
   ].join(" | ");
 }
 
-function formatMacroBlock(macro: MacroGlobalContext): string {
-  if (macro.items.length === 0) return "";
-  const lines = macro.items.map((item) => {
-    const sectors = item.affectedSectors.length > 0 ? ` [${item.affectedSectors.join(", ")}]` : "";
-    return `  • [${item.impactLevel}]${sectors} ${item.title}`;
-  });
-  return `\nContexto macroeconómico global (últimas 24h):\n${lines.join("\n")}`;
+/**
+ * Builds a dynamic system instruction that injects macro and earnings context
+ * as background knowledge for the model, so it applies a consistent macro bias
+ * across all three horizon analyses without repeating it in the user prompt.
+ */
+function buildDynamicSystemInstruction(
+  macroContext?: MacroGlobalContext | null,
+  earningsGuidance?: EarningsGuidanceInsight | null
+): string {
+  let instruction = SYSTEM_INSTRUCTION_ALL;
+
+  if (macroContext && macroContext.items.length > 0) {
+    const lines = macroContext.items.map((item) => {
+      const sectors = item.affectedSectors.length > 0 ? ` [${item.affectedSectors.join(", ")}]` : "";
+      return `  • [${item.impactLevel}]${sectors} ${item.title}`;
+    });
+    instruction += `\n\nCONTEXTO MACROECONÓMICO GLOBAL (últimas 24h):\n${lines.join("\n")}`;
+    if (macroContext.items.some((i) => i.impactLevel === "HIGH")) {
+      instruction +=
+        "\nSESGO MACRO: Hay eventos de impacto HIGH activos. Reduce el confidenceScore en señales COMPRA " +
+        "y justifica explícitamente el riesgo macro en quantitativeJustification.";
+    }
+  }
+
+  if (earningsGuidance) {
+    const rev = earningsGuidance.revenueGuidanceYoY != null
+      ? `${earningsGuidance.revenueGuidanceYoY > 0 ? "+" : ""}${earningsGuidance.revenueGuidanceYoY}% YoY`
+      : "no declarado";
+    const quote = earningsGuidance.keyCeoQuotes[0] ?? "";
+    instruction +=
+      `\n\nGUIDANCE CORPORATIVO (${earningsGuidance.fiscalQuarter}):` +
+      `\n  • Sentimiento directiva: ${earningsGuidance.sentiment}` +
+      `\n  • Revenue guidance: ${rev} | EPS: ${earningsGuidance.epsGuidanceStatus}` +
+      (quote ? `\n  • CEO/CFO: "${quote}"` : "") +
+      `\n  • Contexto: ${earningsGuidance.macroImpactJustification}`;
+    if (earningsGuidance.sentiment === "CONTRACTIVO") {
+      instruction +=
+        "\nSESGO EARNINGS: Guidance CONTRACTIVO confirmado. Sesga señales hacia MANTENER o REDUCIR " +
+        "salvo soporte técnico de alta convicción (confidenceScore > 70).";
+    } else if (earningsGuidance.sentiment === "EXPANSIVO") {
+      instruction +=
+        "\nSESGO EARNINGS: Guidance EXPANSIVO confirmado. Puedes elevar el confidenceScore en señales COMPRA " +
+        "cuando los indicadores técnicos lo respalden.";
+    }
+  }
+
+  return instruction;
 }
 
 function buildAllHorizonsPrompt(
@@ -304,8 +345,7 @@ function buildAllHorizonsPrompt(
   newsSentiment: Sentiment,
   riskProfile?: string | null,
   quantMetrics?: PortfolioQuantMetrics | null,
-  fearGreedScore?: number | null,
-  macroContext?: MacroGlobalContext | null
+  fearGreedScore?: number | null
 ): string {
   const m = allFundamentals.medium;
   const l = allFundamentals.long;
@@ -327,13 +367,11 @@ function buildAllHorizonsPrompt(
     ? `\nAlerta de diversificación: ${ticker} tiene correlación >0.75 con ${highCorrPairs.map((c) => c.ticker).join(", ")}.`
     : "";
 
-  const macroCtx = macroContext ? formatMacroBlock(macroContext) : "";
-  const macroInstruction = macroContext && macroContext.items.some((i) => i.impactLevel === "HIGH")
-    ? "\nINSTRUCCIÓN MACRO: Hay eventos macroeconómicos de impacto HIGH activos. Reduce el confidenceScore en señales COMPRA y aumenta el peso de riesgos en el análisis."
-    : "";
+  // Macro context and earnings guidance are injected in systemInstruction (see buildDynamicSystemInstruction)
+  // to apply a consistent macro bias across all horizon blocks without inflating the user prompt.
 
   return `Efectúa un diagnóstico de riesgo multi-horizonte y genera señales algorítmicas para el activo [${ticker}].
-Fecha: ${getTemporalContext()}.${riskCtx}${quantCtx}${fgCtx}${diversAlert}${macroCtx}${macroInstruction}
+Fecha: ${getTemporalContext()}.${riskCtx}${quantCtx}${fgCtx}${diversAlert}
 
 Datos de mercado:
 - Precio actual: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
@@ -447,16 +485,19 @@ export async function generateAllHorizonsAnalysis(
   riskProfile?: string | null,
   quantMetrics?: PortfolioQuantMetrics | null,
   fearGreedScore?: number | null,
-  macroContext?: MacroGlobalContext | null
+  macroContext?: MacroGlobalContext | null,
+  earningsGuidance?: EarningsGuidanceInsight | null
 ): Promise<AllHorizonsAIAnalysis> {
   const prompt = buildAllHorizonsPrompt(
     ticker, price, changePercent, indicators,
     allFundamentals, newsAnalysis.summary, newsAnalysis.sentiment,
-    riskProfile, quantMetrics, fearGreedScore, macroContext
+    riskProfile, quantMetrics, fearGreedScore
   );
 
+  const systemInstruction = buildDynamicSystemInstruction(macroContext, earningsGuidance);
+
   const raw = await geminiChat(prompt, 2000, 3, {
-    systemInstruction: SYSTEM_INSTRUCTION_ALL,
+    systemInstruction,
     jsonMode: true,
   });
 
