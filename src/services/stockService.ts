@@ -12,7 +12,7 @@ import type { InvestmentHorizon } from "@/types/models";
 
 const VALID_HORIZONS = new Set<InvestmentHorizon>(["SHORT_TERM", "MEDIUM_TERM", "LONG_TERM"]);
 
-const MAX_STOCKS = 5;
+const MAX_STOCKS = 10;
 // Formato válido: 1-5 letras mayúsculas, opcionalmente seguido de punto y más letras (ej: BRK.B)
 const TICKER_REGEX = /^[A-Z]{1,5}(\.[A-Z]{1,2})?$/;
 
