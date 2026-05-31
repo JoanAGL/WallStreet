@@ -39,6 +39,16 @@ vi.mock("@/lib/newsApiClient", () => ({
   fetchNewsForTicker: vi.fn(),
 }));
 
+vi.mock("@/services/newsAnalysisService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/newsAnalysisService")>();
+  return {
+    ...actual,
+    fetchArticlesForTicker: vi.fn(),
+    batchAnalyzeSentiment: vi.fn(),
+    analyzeNewsForTicker: vi.fn(), // keep for partial-update path
+  };
+});
+
 vi.mock("@/lib/yahooFinanceClient", () => ({
   fetchAllFundamentals: vi.fn(),
 }));
@@ -77,6 +87,7 @@ import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import { upsertAnalysis, getAnalysisByStockId } from "@/repositories/analysisRepository";
 import { getGlobalContext } from "@/services/macroService";
 import { EarningsService } from "@/services/earningsService";
+import { fetchArticlesForTicker, batchAnalyzeSentiment } from "@/services/newsAnalysisService";
 import { runAnalysisForStocks } from "@/services/analysisOrchestrator";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -125,6 +136,22 @@ function setupMocks() {
 
   vi.mocked(fetchNewsForTicker).mockResolvedValue(MOCK_NEWS_ARTICLES);
 
+  // fetchArticlesForTicker: NewsAPI-only phase (no Gemini)
+  vi.mocked(fetchArticlesForTicker).mockResolvedValue({
+    articles: MOCK_NEWS_ARTICLES.map((a) => ({
+      title: a.title,
+      description: a.description ?? "",
+      url: a.url,
+      publishedAt: a.publishedAt,
+      source: a.source.name,
+    })),
+  });
+
+  // batchAnalyzeSentiment: returns pre-computed sentiment map
+  vi.mocked(batchAnalyzeSentiment).mockResolvedValue(
+    new Map([[MOCK_TICKER, { summary: "Resultados sólidos.", sentiment: "Positivo" as const }]])
+  );
+
   vi.mocked(fetchAllFundamentals).mockResolvedValue(makeMockFundamentals());
 
   vi.mocked(getGlobalContext).mockResolvedValue({
@@ -141,11 +168,11 @@ function setupMocks() {
     macroImpactJustification: "Rising rates create headwinds but product cycle offsets them.",
   });
 
-  // Gemini: news analysis call
-  vi.mocked(geminiChat)
-    .mockResolvedValueOnce(JSON.stringify(MOCK_NEWS_ANALYSIS_RESPONSE))
-    // Gemini: all-horizons analysis call
-    .mockResolvedValueOnce(JSON.stringify(MOCK_ALL_HORIZONS_RESPONSE));
+  // Only 1 Gemini call now: batch all-horizons.
+  // News sentiment is mocked via batchAnalyzeSentiment (bypasses Gemini in tests).
+  vi.mocked(geminiChat).mockResolvedValue(
+    JSON.stringify({ [MOCK_TICKER]: MOCK_ALL_HORIZONS_RESPONSE })
+  );
 
   vi.mocked(getAnalysisByStockId).mockResolvedValue(null); // force fresh analysis
 
@@ -234,17 +261,19 @@ describe("runAnalysisForStocks — pipeline integration", () => {
     });
   });
 
-  it("calls Gemini exactly twice per stock (news + all-horizons)", async () => {
+  it("batch pipeline: Gemini called exactly ONCE for 1 stock (1 batch AI call)", async () => {
     await runAnalysisForStocks(
       [{ id: MOCK_STOCK.id, ticker: MOCK_TICKER, investmentHorizon: "SHORT_TERM" }],
       true
     );
-    expect(vi.mocked(geminiChat)).toHaveBeenCalledTimes(2);
+    // News sentiment is handled by batchAnalyzeSentiment (mocked — no Gemini in test).
+    // Only the batch all-horizons call goes through geminiChat.
+    // Previous: 2 calls/stock × N stocks. Now: 1 batch call regardless of N ≤ BATCH_SIZE.
+    expect(vi.mocked(geminiChat)).toHaveBeenCalledTimes(1);
   });
 
-  it("handles Gemini failure gracefully — saves partial analysis without throwing", async () => {
-    // mockReset() clears queued mockResolvedValueOnce items set by setupMocks()
-    // so the rejection applies to ALL calls, not just the third+
+  it("handles Gemini failure gracefully — persists fallback analysis, no throw", async () => {
+    // Reject all Gemini calls: both batchGenerateAllHorizons and its individual fallback
     vi.mocked(geminiChat).mockReset().mockRejectedValue(new Error("Gemini rate limit"));
 
     const results = await runAnalysisForStocks(
@@ -252,11 +281,11 @@ describe("runAnalysisForStocks — pipeline integration", () => {
       true
     );
 
-    // Should not throw — result still exists, success=false, error captured
+    // New batch pipeline: Gemini failure → FALLBACK_ALL used; persist still runs.
+    // success=true because upsertAnalysis succeeds with fallback data.
+    // The analysis is stored with scenarioLabel="Neutral" and no allHorizons.
     expect(results).toHaveLength(1);
-    expect(results[0].success).toBe(false);
-    expect(results[0].error).toContain("Gemini rate limit");
-    // Market data was persisted even though AI failed
+    expect(results[0].success).toBe(true);
     expect(upsertAnalysis).toHaveBeenCalled();
   });
 

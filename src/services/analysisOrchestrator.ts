@@ -1,9 +1,9 @@
 import { getCurrentQuote, getHistoricalCloses } from "./marketDataService";
 import { calculateIndicators } from "./technicalAnalysisService";
-import { analyzeNewsForTicker } from "./newsAnalysisService";
-import type { DataIssue } from "./newsAnalysisService";
-import { generateAllHorizonsAnalysis } from "./aiAnalysisService";
-import type { AllHorizonsAIAnalysis, HorizonAnalysis } from "./aiAnalysisService";
+import { analyzeNewsForTicker, fetchArticlesForTicker, batchAnalyzeSentiment } from "./newsAnalysisService";
+import type { DataIssue, NewsAnalysis } from "./newsAnalysisService";
+import { generateAllHorizonsAnalysis, batchGenerateAllHorizons, FALLBACK_HORIZON } from "./aiAnalysisService";
+import type { AllHorizonsAIAnalysis, HorizonAnalysis, BatchStockInput } from "./aiAnalysisService";
 import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore } from "./quantitativeService";
 import { getGlobalContext } from "./macroService";
 import type { MacroGlobalContext } from "./macroService";
@@ -257,37 +257,92 @@ async function runFullAnalysis(
     quantHistoricalData, quantCurrentPrices, quantQuantities
   );
 
-  // Phase 3+4+5: Sequential Gemini calls, but per-stock I/O is parallelized
-  for (const { stock, quote, indicators, allFundamentals } of withMarket) {
-    const horizon: InvestmentHorizon = stock.investmentHorizon ?? "SHORT_TERM";
-    let newsAnalysis: Awaited<ReturnType<typeof analyzeNewsForTicker>> | null = null;
-    let earningsGuidance: EarningsGuidanceInsight | null = null;
-    const dataIssues: DataIssue[] = [];
+  // Phase 3: Fetch news articles (NewsAPI only, no Gemini) + earnings in parallel
+  const [articleResults, earningsResults] = await Promise.all([
+    Promise.allSettled(
+      withMarket.map(({ stock }) => fetchArticlesForTicker(stock.ticker))
+    ),
+    Promise.allSettled(
+      withMarket.map(({ stock }) =>
+        EarningsService.getGuidanceInsight(stock.ticker).catch(() => null)
+      )
+    ),
+  ]);
 
+  // Phase 4: Batch news sentiment — ONE Gemini call for all tickers with articles
+  const newsArticleInputs: Array<{ ticker: string; articles: import("./newsAnalysisService").NewsArticle[] }> = [];
+  const newsAnalysisMap = new Map<string, NewsAnalysis>();
+  const now = new Date().toISOString();
+
+  withMarket.forEach(({ stock }, i) => {
+    const r = articleResults[i];
+    if (r.status === "fulfilled") {
+      const { articles, dataIssue } = r.value;
+      if (articles.length > 0) {
+        newsArticleInputs.push({ ticker: stock.ticker, articles });
+      }
+      // Placeholder — sentiment will be filled after batch call
+      newsAnalysisMap.set(stock.ticker, {
+        ticker: stock.ticker, articles,
+        summary: "Pendiente de análisis.", sentiment: "Neutral",
+        analyzedAt: now, dataIssue,
+      });
+    } else {
+      const message = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      newsAnalysisMap.set(stock.ticker, {
+        ticker: stock.ticker, articles: [],
+        summary: "Error al obtener noticias.", sentiment: "Neutral",
+        analyzedAt: now,
+        dataIssue: { kind: "API_ERROR", source: "news", message },
+      });
+    }
+  });
+
+  if (newsArticleInputs.length > 0) {
+    const batchSentiments = await batchAnalyzeSentiment(newsArticleInputs);
+    batchSentiments.forEach((result, ticker) => {
+      const existing = newsAnalysisMap.get(ticker);
+      if (existing) {
+        newsAnalysisMap.set(ticker, { ...existing, summary: result.summary, sentiment: result.sentiment });
+      }
+    });
+  }
+
+  // Phase 5: Build batch inputs and run batch all-horizons AI (ceil(N/4) Gemini calls)
+  const batchInputs: BatchStockInput[] = withMarket.map(({ stock, quote, indicators, allFundamentals }, i) => {
     const quantMetrics = findTickerMetrics(allQuantMetrics, stock.ticker);
+    const newsAnalysis = newsAnalysisMap.get(stock.ticker)!;
+    const sentiment = newsAnalysis.sentiment as "Positivo" | "Neutral" | "Negativo";
+    const fearGreedScore = indicators.rsi14 != null
+      ? calculateFearGreedScore(indicators.rsi14, sentiment)
+      : null;
+    const earningsResult = earningsResults[i];
+    const earningsGuidance = earningsResult.status === "fulfilled" ? earningsResult.value : null;
 
-    try {
-      // Fetch news and earnings guidance in parallel — both are cached, low latency
-      [newsAnalysis, earningsGuidance] = await Promise.all([
-        analyzeNewsForTicker(stock.ticker),
-        EarningsService.getGuidanceInsight(stock.ticker).catch((err) => {
-          console.warn(`[ORCHESTRATOR] EarningsService failed for ${stock.ticker}:`, err);
-          return null;
-        }),
-      ]);
-      if (newsAnalysis.dataIssue) dataIssues.push(newsAnalysis.dataIssue);
+    return {
+      ticker: stock.ticker,
+      price: quote.price,
+      changePercent: quote.changePercent,
+      indicators,
+      newsAnalysis,
+      allFundamentals,
+      riskProfile,
+      quantMetrics,
+      fearGreedScore,
+      earningsGuidance,
+    };
+  });
 
-      // Fear & Greed score computed from RSI + news sentiment
-      const sentiment = newsAnalysis.sentiment as "Positivo" | "Neutral" | "Negativo";
-      const fearGreedScore = indicators.rsi14 != null
-        ? calculateFearGreedScore(indicators.rsi14, sentiment)
-        : null;
+  const allHorizonsMap = await batchGenerateAllHorizons(batchInputs, macroContext);
 
-      const allAI = await generateAllHorizonsAnalysis(
-        stock.ticker, quote.price, quote.changePercent,
-        indicators, newsAnalysis, allFundamentals,
-        riskProfile, quantMetrics, fearGreedScore, macroContext, earningsGuidance
-      );
+  // Phase 6: Persist results in parallel
+  const persistResults = await Promise.allSettled(
+    withMarket.map(async ({ stock, quote, indicators, allFundamentals }) => {
+      const horizon: InvestmentHorizon = stock.investmentHorizon ?? "SHORT_TERM";
+      const newsAnalysis = newsAnalysisMap.get(stock.ticker)!;
+      const allAI = allHorizonsMap.get(stock.ticker) ?? {
+        shortTerm: FALLBACK_HORIZON, mediumTerm: FALLBACK_HORIZON, longTerm: FALLBACK_HORIZON,
+      };
       const active = horizonToAI(allAI, horizon);
       const metricsData = buildMetricsData(horizon, indicators, allFundamentals);
 
@@ -306,42 +361,27 @@ async function runFullAnalysis(
         allHorizons: JSON.stringify(allAI),
       });
 
-      if (dataIssues.length) {
-        dataIssues.forEach((issue) =>
-          console.warn(`[ORCHESTRATOR] ${stock.ticker} - ${issue.kind} (${issue.source}): ${issue.message}`)
-        );
-      }
-
       insertSnapshot({
         stockId: stock.id, price: quote.price, changePercent: quote.changePercent,
         scenarioLabel: active.scenarioLabel, horizonUsed: horizon, rsi14: indicators.rsi14,
       }).catch((e) => console.warn("[ORCHESTRATOR] History snapshot failed:", e));
 
+      const dataIssues: DataIssue[] = newsAnalysis.dataIssue ? [newsAnalysis.dataIssue] : [];
+      return { stock, analysis, dataIssues };
+    })
+  );
+
+  persistResults.forEach((r, i) => {
+    const { stock } = withMarket[i];
+    if (r.status === "fulfilled") {
+      const { analysis, dataIssues } = r.value;
       finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: true, analysis, dataIssues });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[ORCHESTRATOR] ${stock.ticker} AI error: ${msg}`);
-      try {
-        const analysis = await upsertAnalysis({
-          stockId: stock.id,
-          price: quote.price, changePercent: quote.changePercent,
-          sma20: indicators.sma20, sma50: indicators.sma50, rsi14: indicators.rsi14,
-          newsSummary: newsAnalysis?.summary ?? "Resumen de noticias no disponible.",
-          newsSentiment: newsAnalysis?.sentiment ?? "Neutral",
-          analysisText: "Análisis de IA temporalmente no disponible. Los datos de mercado han sido actualizados.",
-          scenarioLabel: "Neutral",
-          scenarioJustification: "El análisis automático no está disponible en este momento.",
-          divergenceAlert: false, horizonMatch: null, keyMetrics: null,
-          metricsData: JSON.stringify(buildMetricsData(horizon, indicators, allFundamentals)),
-          allHorizons: null,
-        });
-        dataIssues.push({ kind: "API_ERROR", source: "ai", message: msg });
-        finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg, analysis, dataIssues });
-      } catch {
-        finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg, dataIssues });
-      }
+    } else {
+      const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      console.error(`[ORCHESTRATOR] Persist failed for ${stock.ticker}: ${msg}`);
+      finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: false, error: msg });
     }
-  }
+  });
 
   return finalResults;
 }

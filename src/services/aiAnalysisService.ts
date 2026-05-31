@@ -245,7 +245,7 @@ export interface AllHorizonsAIAnalysis {
   longTerm:   HorizonAnalysis;
 }
 
-const FALLBACK_HORIZON: HorizonAnalysis = {
+export const FALLBACK_HORIZON: HorizonAnalysis = {
   analysisText:         "Análisis no disponible en este momento.",
   scenarioLabel:        "Neutral",
   scenarioJustification:"Datos insuficientes para determinar el escenario.",
@@ -506,4 +506,138 @@ export async function generateAllHorizonsAnalysis(
   } catch {
     return { shortTerm: FALLBACK_HORIZON, mediumTerm: FALLBACK_HORIZON, longTerm: FALLBACK_HORIZON };
   }
+}
+
+// ── Batch All-Horizons Analysis ───────────────────────────────────────────────
+
+export interface BatchStockInput {
+  ticker: string;
+  price: number;
+  changePercent: number;
+  indicators: TechnicalIndicators;
+  newsAnalysis: NewsAnalysis;
+  allFundamentals: AllFundamentals;
+  riskProfile?: string | null;
+  quantMetrics?: PortfolioQuantMetrics | null;
+  fearGreedScore?: number | null;
+  earningsGuidance?: EarningsGuidanceInsight | null;
+}
+
+// Max tickers per Gemini call. 4 keeps the prompt + response under ~8k tokens.
+const BATCH_SIZE = 4;
+
+const FALLBACK_ALL: AllHorizonsAIAnalysis = {
+  shortTerm: FALLBACK_HORIZON,
+  mediumTerm: FALLBACK_HORIZON,
+  longTerm: FALLBACK_HORIZON,
+};
+
+function formatStockDataBlock(input: BatchStockInput): string {
+  const { ticker, price, changePercent, indicators, newsAnalysis, allFundamentals, quantMetrics, fearGreedScore, earningsGuidance } = input;
+  const sign = changePercent >= 0 ? "+" : "";
+  const lines: string[] = [
+    `[${ticker}] $${price.toFixed(2)} (${sign}${changePercent.toFixed(2)}%)`,
+    `  Técnicos: ${formatTechnicalBlock(indicators)}`,
+    `  Medio: ${formatMediumBlock(allFundamentals.medium)}`,
+    `  Largo: ${formatLongBlock(allFundamentals.long)}`,
+    `  Noticias: ${newsAnalysis.summary} | Sentimiento: ${newsAnalysis.sentiment}`,
+  ];
+  if (fearGreedScore != null) {
+    lines.push(`  Fear&Greed: ${fearGreedScore}/100`);
+  }
+  if (quantMetrics) {
+    lines.push(`  Sharpe: ${quantMetrics.sharpeRatio} | Kelly: ${quantMetrics.kellyFraction} | Peso: ${quantMetrics.portfolioWeight}%`);
+  }
+  if (earningsGuidance) {
+    const rev = earningsGuidance.revenueGuidanceYoY != null ? `${earningsGuidance.revenueGuidanceYoY}% YoY` : "N/D";
+    lines.push(`  Guidance (${earningsGuidance.fiscalQuarter}): ${earningsGuidance.sentiment} | Revenue: ${rev} | EPS: ${earningsGuidance.epsGuidanceStatus}`);
+  }
+  return lines.join("\n");
+}
+
+function buildBatchPrompt(inputs: BatchStockInput[]): string {
+  const dataBlocks = inputs.map(formatStockDataBlock).join("\n\n");
+  const tickerKeys = inputs.map((i) => `"${i.ticker}": { "shortTerm": {...}, "mediumTerm": {...}, "longTerm": {...} }`).join(",\n  ");
+
+  return `Efectúa un diagnóstico de riesgo multi-horizonte para los siguientes activos.
+Fecha: ${getTemporalContext()}.
+
+${dataBlocks}
+
+Genera el siguiente JSON con proyecciones algorítmicas por horizonte para CADA activo.
+El esquema de cada bloque es idéntico al estándar (analysisText, scenarioLabel, scenarioJustification, divergenceAlert, horizonMatch, keyMetrics, portfolioAlert, prescriptiveAction).
+
+{
+  ${tickerKeys}
+}
+
+prescriptiveAction.action: "COMPRA|VENTA|MANTENER|REDUCIR"
+prescriptiveAction.confidenceScore: 0-100
+prescriptiveAction.executionPriceLimit: nivel técnico en USD
+prescriptiveAction.estimatedHorizonDays: días estimados del horizonte`;
+}
+
+/**
+ * Generates AllHorizonsAIAnalysis for multiple tickers in BATCH_SIZE groups.
+ * Reduces N individual Gemini calls to ceil(N/BATCH_SIZE) calls.
+ *
+ * Per-group error handling: if a batch call fails, falls back to individual
+ * calls for each ticker in that group rather than returning all fallbacks.
+ */
+export async function batchGenerateAllHorizons(
+  inputs: BatchStockInput[],
+  macroContext?: MacroGlobalContext | null
+): Promise<Map<string, AllHorizonsAIAnalysis>> {
+  const resultMap = new Map<string, AllHorizonsAIAnalysis>();
+
+  // Build system instruction once — shared across all batch groups
+  // earningsGuidance varies per ticker so it goes in the user prompt data block (formatStockDataBlock)
+  const systemInstruction = buildDynamicSystemInstruction(macroContext, null);
+
+  // Split into groups of BATCH_SIZE
+  for (let i = 0; i < inputs.length; i += BATCH_SIZE) {
+    const group = inputs.slice(i, i + BATCH_SIZE);
+    const tickers = group.map((g) => g.ticker);
+
+    try {
+      const prompt = buildBatchPrompt(group);
+      const raw = await geminiChat(prompt, 2000 * group.length, 2, {
+        systemInstruction,
+        jsonMode: true,
+      });
+
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      tickers.forEach((ticker) => {
+        const entry = ZAllHorizons.safeParse(parsed[ticker]);
+        if (entry.success) {
+          resultMap.set(ticker, entry.data as AllHorizonsAIAnalysis);
+        } else {
+          console.warn(`[aiAnalysis] Batch Zod failed for ${ticker}:`, entry.error.flatten());
+          resultMap.set(ticker, FALLBACK_ALL);
+        }
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[aiAnalysis] Batch call failed (${message}), falling back to individual calls for ${tickers.join(", ")}`);
+
+      // Individual fallback for the failed group
+      await Promise.allSettled(
+        group.map(async (input) => {
+          try {
+            const analysis = await generateAllHorizonsAnalysis(
+              input.ticker, input.price, input.changePercent,
+              input.indicators, input.newsAnalysis, input.allFundamentals,
+              input.riskProfile, input.quantMetrics, input.fearGreedScore,
+              macroContext, input.earningsGuidance
+            );
+            resultMap.set(input.ticker, analysis);
+          } catch {
+            resultMap.set(input.ticker, FALLBACK_ALL);
+          }
+        })
+      );
+    }
+  }
+
+  return resultMap;
 }

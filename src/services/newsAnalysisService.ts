@@ -1,5 +1,6 @@
 import { fetchNewsForTicker, type RawNewsArticle } from "@/lib/newsApiClient";
 import { geminiChat } from "@/lib/geminiClient";
+import { z } from "zod";
 
 export type Sentiment = "Positivo" | "Neutral" | "Negativo";
 
@@ -62,6 +63,134 @@ REGLAS OBLIGATORIAS:
 
 Noticias:
 ${headlines}`;
+}
+
+// ── Article fetching (no Gemini) ─────────────────────────────────────────────
+
+/**
+ * Fetches and normalizes articles for one ticker WITHOUT calling Gemini.
+ * Used by the batch orchestrator to collect articles before the single batch
+ * sentiment call. Never throws — returns empty articles + dataIssue on error.
+ */
+export async function fetchArticlesForTicker(
+  ticker: string
+): Promise<{ articles: NewsArticle[]; dataIssue?: DataIssue }> {
+  try {
+    const raw = await fetchNewsForTicker(ticker, 48);
+    const articles = raw.slice(0, 8).map(normalizeArticle);
+    if (articles.length === 0) {
+      return {
+        articles: [],
+        dataIssue: { kind: "NO_DATA", source: "news", message: "Sin artículos en las últimas 48h" },
+      };
+    }
+    return { articles };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      articles: [],
+      dataIssue: { kind: "API_ERROR", source: "news", message },
+    };
+  }
+}
+
+// ── Zod schema for batch sentiment response ───────────────────────────────────
+
+const BatchSentimentSchema = z.record(
+  z.string(),
+  z.object({
+    summary:   z.string().catch("Resumen no disponible."),
+    sentiment: z.enum(["Positivo", "Neutral", "Negativo"]).catch("Neutral"),
+  })
+);
+
+/**
+ * Analyzes news sentiment for multiple tickers in a SINGLE Gemini call.
+ * Reduces N individual calls to 1, cutting latency and token cost proportionally.
+ *
+ * Falls back gracefully: if Gemini returns partial or invalid JSON, missing
+ * tickers default to { summary: "No disponible", sentiment: "Neutral" }.
+ */
+export async function batchAnalyzeSentiment(
+  inputs: Array<{ ticker: string; articles: NewsArticle[] }>
+): Promise<Map<string, { summary: string; sentiment: Sentiment }>> {
+  const active = inputs.filter((inp) => inp.articles.length > 0);
+  const result = new Map<string, { summary: string; sentiment: Sentiment }>();
+  const fallback = { summary: "No se encontraron noticias recientes.", sentiment: "Neutral" as Sentiment };
+
+  // Tickers with no articles get the fallback immediately
+  inputs.forEach(({ ticker, articles }) => {
+    if (articles.length === 0) result.set(ticker, fallback);
+  });
+
+  if (active.length === 0) return result;
+
+  const sections = active
+    .map(({ ticker, articles }) => {
+      const headlines = articles
+        .slice(0, 5)
+        .map((a, i) => `  ${i + 1}. [${a.source}] ${a.title}`)
+        .join("\n");
+      return `${ticker}:\n${headlines}`;
+    })
+    .join("\n\n");
+
+  const tickerList = active.map((i) => `"${i.ticker}": { "summary": "...", "sentiment": "Positivo|Neutral|Negativo" }`).join(",\n  ");
+
+  const prompt = `Eres un analista informativo de mercados. Analiza las noticias de cada ticker y responde en español con el siguiente JSON (sin markdown):
+
+{
+  ${tickerList}
+}
+
+REGLAS: No hagas recomendaciones. El sentimiento debe reflejar el tono general de cada sección.
+Sin noticias claras → sentiment "Neutral".
+
+Noticias (últimas 48h):
+${sections}`;
+
+  try {
+    const raw = await geminiChat(prompt, 150 * active.length, 2, {
+      systemInstruction:
+        "Motor de análisis de noticias financieras. Responde únicamente con JSON válido.",
+      jsonMode: true,
+      temperature: 0.1,
+    });
+
+    const parsed = BatchSentimentSchema.safeParse(JSON.parse(raw));
+    if (parsed.success) {
+      active.forEach(({ ticker }) => {
+        const entry = parsed.data[ticker];
+        result.set(ticker, entry ?? fallback);
+      });
+    } else {
+      console.warn("[NewsAnalysis] Batch Zod validation failed, using fallback for all");
+      active.forEach(({ ticker }) => result.set(ticker, fallback));
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[NewsAnalysis] Batch Gemini failed (${message}), falling back to individual calls`);
+    // Fallback: run individual calls for each ticker that didn't get a result
+    await Promise.allSettled(
+      active.map(async ({ ticker, articles }) => {
+        if (result.has(ticker)) return;
+        try {
+          const prompt = buildPrompt(ticker, articles);
+          const raw = await geminiChat(prompt, 400);
+          const p = JSON.parse(raw) as { summary?: string; sentiment?: string };
+          const s = p.sentiment;
+          result.set(ticker, {
+            summary: p.summary ?? fallback.summary,
+            sentiment: s === "Positivo" || s === "Negativo" || s === "Neutral" ? s : "Neutral",
+          });
+        } catch {
+          result.set(ticker, fallback);
+        }
+      })
+    );
+  }
+
+  return result;
 }
 
 // Esta función nunca lanza: clasifica el error y devuelve un resultado degradado.
