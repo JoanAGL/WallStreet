@@ -1,23 +1,32 @@
 import { dailyReturns, pearson } from "@/lib/portfolioMath";
 
-// ── EWMA Volatility ───────────────────────────────────────────────────────────
-// Exponentially Weighted Moving Average with λ=0.94 (RiskMetrics standard).
-// More reactive to recent market events than simple historical std dev.
-const EWMA_LAMBDA = 0.94;
+// ── GARCH(1,1) Volatility ─────────────────────────────────────────────────────
+// Generalized AutoRegressive Conditional Heteroskedasticity.
+// Captures volatility clustering better than EWMA because it models both
+// short-term shock reaction (α) and long-run persistence (β) separately.
+//
+// σ²_t = ω + α·r²_{t-1} + β·σ²_{t-1}
+// ω = (1 − α − β) · long_run_var  (ensures stationarity: α + β < 1)
+//
+// Standard values: α=0.09, β=0.90 (sum=0.99, high persistence, low reaction)
+const GARCH_ALPHA = 0.09;
+const GARCH_BETA  = 0.90;
 
-function ewmaVariance(returns: number[]): number {
+function garchVariance(returns: number[]): number {
   if (returns.length === 0) return 0;
-  let variance = returns[0] ** 2;
-  for (let i = 1; i < returns.length; i++) {
-    variance = EWMA_LAMBDA * variance + (1 - EWMA_LAMBDA) * returns[i] ** 2;
+  const n = returns.length;
+  const longRunVar = returns.reduce((s, r) => s + r * r, 0) / n;
+  const omega = (1 - GARCH_ALPHA - GARCH_BETA) * longRunVar;
+  let sigma2 = longRunVar; // seed at unconditional variance
+  for (let i = 0; i < n; i++) {
+    sigma2 = omega + GARCH_ALPHA * returns[i] ** 2 + GARCH_BETA * sigma2;
   }
-  return variance;
+  return sigma2; // conditional variance forecast for next period
 }
 
 // ── Dynamic risk-free rate ────────────────────────────────────────────────────
-// Reads T-bill proxy from env, defaults to 3.5%.
 // Set RISK_FREE_RATE_ANNUAL=0.053 in Vercel env to reflect current Fed funds rate.
-function getAnnualRiskFreeRate(): number {
+export function getAnnualRiskFreeRate(): number {
   const envRate = process.env.RISK_FREE_RATE_ANNUAL;
   if (envRate) {
     const parsed = parseFloat(envRate);
@@ -26,18 +35,28 @@ function getAnnualRiskFreeRate(): number {
   return 0.035;
 }
 
-// ── Índice Fear & Greed propietario ──────────────────────────────────────────
-// Combina RSI (componente técnico contrarian) y sentimiento noticioso.
-// Rango: 0 (extremo miedo) → 100 (extrema codicia)
+// ── Kelly Criterion ───────────────────────────────────────────────────────────
+// Continuous-time Kelly fraction: f* = (μ − r) / σ²
+// Gives the theoretically optimal fraction of capital to allocate to an asset.
+// Capped at 1.0 (no leverage) and floored at 0 (no shorting in this context).
+export function kellyFraction(
+  expectedAnnualReturn: number,
+  annualVariance: number,
+  riskFreeRate = getAnnualRiskFreeRate()
+): number {
+  if (annualVariance <= 0) return 0;
+  const excess = expectedAnnualReturn - riskFreeRate;
+  return parseFloat(Math.min(1, Math.max(0, excess / annualVariance)).toFixed(4));
+}
 
+// ── Índice Fear & Greed propietario ──────────────────────────────────────────
 export function calculateFearGreedScore(
   rsi: number,
   sentiment: "Positivo" | "Neutral" | "Negativo"
 ): number {
-  const technicalComponent = 100 - rsi; // contrarian: RSI alto = codicia, RSI bajo = miedo
+  const technicalComponent = 100 - rsi;
   const sentimentComponent =
     sentiment === "Positivo" ? 90 : sentiment === "Negativo" ? 10 : 50;
-
   return Math.round(technicalComponent * 0.4 + sentimentComponent * 0.6);
 }
 
@@ -53,10 +72,12 @@ export interface PortfolioQuantMetrics {
   ticker: string;
   /** Annualized Sharpe ratio (dynamic risk-free rate from RISK_FREE_RATE_ANNUAL env) */
   sharpeRatio: number;
-  /** Annualized EWMA volatility (λ=0.94) as % — more reactive than simple std dev */
+  /** Annualized GARCH(1,1) conditional volatility as % */
   volatility30d: number;
   portfolioWeight: number;
   correlatedTickers: Array<{ ticker: string; correlationFactor: number }>;
+  /** Kelly Criterion optimal position fraction 0–1 (unconstrained) */
+  kellyFraction: number;
 }
 
 export function calculatePortfolioQuantMetrics(
@@ -69,13 +90,11 @@ export function calculatePortfolioQuantMetrics(
 
   const riskFree = getAnnualRiskFreeRate();
 
-  // Daily returns for each ticker
   const returnsMap: Record<string, number[]> = {};
   for (const t of tickers) {
     returnsMap[t] = dailyReturns(historicalData[t]);
   }
 
-  // Total portfolio market value (for weight calc)
   const totalValue = tickers.reduce(
     (sum, t) => sum + (currentPrices[t] ?? 0) * (quantities[t] ?? 0),
     0
@@ -85,27 +104,25 @@ export function calculatePortfolioQuantMetrics(
     const ret = returnsMap[ticker];
     const n = ret.length;
 
-    // Mean daily return (for annualized return estimate)
     const meanDaily = n > 0 ? ret.reduce((s, v) => s + v, 0) / n : 0;
     const annReturn = meanDaily * 252;
 
-    // EWMA daily variance → annualized volatility
-    const dailyVarEWMA = ewmaVariance(ret);
-    const annVol = Math.sqrt(dailyVarEWMA * 252);
+    // GARCH(1,1) daily conditional variance → annualized
+    const dailyVarGARCH = garchVariance(ret);
+    const annVar = dailyVarGARCH * 252;
+    const annVol = Math.sqrt(annVar);
 
     const sharpeRatio =
       annVol > 0 ? parseFloat(((annReturn - riskFree) / annVol).toFixed(3)) : 0;
 
     const volatility30d = parseFloat((annVol * 100).toFixed(2));
 
-    // Portfolio weight by market value; equal-weight fallback when no position data
     const myValue = (currentPrices[ticker] ?? 0) * (quantities[ticker] ?? 0);
     const portfolioWeight =
       totalValue > 0
         ? parseFloat(((myValue / totalValue) * 100).toFixed(1))
         : parseFloat((100 / tickers.length).toFixed(1));
 
-    // Pairwise correlations with all other tickers
     const correlatedTickers = tickers
       .filter((t) => t !== ticker)
       .map((t) => ({
@@ -114,7 +131,9 @@ export function calculatePortfolioQuantMetrics(
       }))
       .sort((a, b) => Math.abs(b.correlationFactor) - Math.abs(a.correlationFactor));
 
-    return { ticker, sharpeRatio, volatility30d, portfolioWeight, correlatedTickers };
+    const kelly = kellyFraction(annReturn, annVar, riskFree);
+
+    return { ticker, sharpeRatio, volatility30d, portfolioWeight, correlatedTickers, kellyFraction: kelly };
   });
 }
 

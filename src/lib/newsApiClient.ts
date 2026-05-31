@@ -1,3 +1,5 @@
+import { newsApiBreaker } from "@/lib/circuitBreaker";
+
 const BASE_URL = "https://newsapi.org/v2/everything";
 
 function getApiKey(): string {
@@ -37,20 +39,14 @@ export async function fetchNewsForTicker(
   url.searchParams.set("pageSize", "10");
   url.searchParams.set("apiKey", getApiKey());
 
-  const res = await fetch(url.toString(), { next: { revalidate: 0 } });
-
-  if (!res.ok) {
-    throw new Error(`NewsAPI HTTP error: ${res.status}`);
-  }
-
-  const data = (await res.json()) as RawNewsResponse;
-
-  if (data.status !== "ok") {
-    throw new Error("NewsAPI respuesta inválida");
-  }
-
-  // Filtra artículos sin título o marcados como "[Removed]"
-  return data.articles.filter(
-    (a) => a.title && a.title !== "[Removed]"
+  return newsApiBreaker.fire(
+    async () => {
+      const res = await fetch(url.toString(), { next: { revalidate: 0 } });
+      if (!res.ok) throw new Error(`NewsAPI HTTP error: ${res.status}`);
+      const data = (await res.json()) as RawNewsResponse;
+      if (data.status !== "ok") throw new Error("NewsAPI respuesta inválida");
+      return data.articles.filter((a) => a.title && a.title !== "[Removed]");
+    },
+    () => [] // fallback: empty articles → caller handles NO_DATA gracefully
   );
 }
