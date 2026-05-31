@@ -25,6 +25,73 @@ export interface MonteCarloResult {
   p90: number[];
   days: number;
   initialValue: number;
+  /** Value at Risk at 95% confidence: max loss not exceeded 95% of the time */
+  var95: number;
+  /** Expected Shortfall (CVaR) at 95%: average loss in the worst 5% of outcomes */
+  cvar95: number;
+  /** Probability of portfolio value ending below initial value */
+  probabilityOfLoss: number;
+}
+
+// ── Historical Stress Scenarios ───────────────────────────────────────────────
+// Applies known historical drawdown profiles to a portfolio value.
+// Returns the simulated final value after each crisis, not a path.
+
+export interface StressScenario {
+  name: string;
+  /** Peak-to-trough drawdown as a positive decimal (e.g. 0.56 = 56% drop) */
+  drawdown: number;
+  /** Trading days from peak to trough */
+  durationDays: number;
+  /** Annualized volatility during the crisis period */
+  crisisVolatility: number;
+}
+
+export interface StressTestResult {
+  scenario: string;
+  drawdown: number;
+  portfolioLoss: number;       // USD loss from initial value
+  finalValue: number;
+  durationDays: number;
+  recoveryDays: number | null; // estimated trading days to recover (null if > 5 years)
+}
+
+// Source: empirical S&P 500 data for each event
+const HISTORICAL_SCENARIOS: StressScenario[] = [
+  { name: "2008 Financial Crisis",     drawdown: 0.565, durationDays: 356, crisisVolatility: 0.65 },
+  { name: "2020 COVID Crash",          drawdown: 0.340, durationDays: 33,  crisisVolatility: 0.83 },
+  { name: "2022 Rate Hike Bear Market",drawdown: 0.255, durationDays: 282, crisisVolatility: 0.29 },
+  { name: "2000 Dot-com Bust",         drawdown: 0.491, durationDays: 638, crisisVolatility: 0.28 },
+  { name: "1987 Black Monday",         drawdown: 0.336, durationDays: 101, crisisVolatility: 0.60 },
+];
+
+export function runStressTests(
+  portfolioValue: number,
+  annualMu: number    // expected annual return (post-crisis), used for recovery estimate
+): StressTestResult[] {
+  return HISTORICAL_SCENARIOS.map((scenario) => {
+    const portfolioLoss = portfolioValue * scenario.drawdown;
+    const finalValue = portfolioValue - portfolioLoss;
+
+    // Estimate recovery time: how many trading days to get back to initial value
+    // using the post-crisis drift (annualMu) and normal volatility
+    let recoveryDays: number | null = null;
+    if (annualMu > 0) {
+      const dailyMu = annualMu / 252;
+      // days needed: finalValue * (1 + dailyMu)^n = portfolioValue → n = log(pv/fv) / log(1+mu)
+      const n = Math.log(portfolioValue / finalValue) / Math.log(1 + dailyMu);
+      recoveryDays = n <= 1260 ? Math.ceil(n) : null; // cap at 5 years
+    }
+
+    return {
+      scenario: scenario.name,
+      drawdown: scenario.drawdown,
+      portfolioLoss: parseFloat(portfolioLoss.toFixed(2)),
+      finalValue: parseFloat(finalValue.toFixed(2)),
+      durationDays: scenario.durationDays,
+      recoveryDays,
+    };
+  });
 }
 
 export interface OptimizationResult {
@@ -190,7 +257,19 @@ export function runMonteCarlo(
     p90.push(percentile(col, 90));
   }
 
-  return { p10, p25, p50, p75, p90, days: horizonDays, initialValue: S0 };
+  // CVaR / Expected Shortfall at 95% confidence
+  // Computed from final values across all simulations
+  const finalValues = paths.map((p) => p[horizonDays]).sort((a, b) => a - b);
+  const varIdx = Math.floor(0.05 * finalValues.length);
+  const var95 = parseFloat((S0 - finalValues[varIdx]).toFixed(2));
+  const cvar95 = parseFloat(
+    (S0 - finalValues.slice(0, varIdx + 1).reduce((s, v) => s + v, 0) / (varIdx + 1)).toFixed(2)
+  );
+  const probabilityOfLoss = parseFloat(
+    (finalValues.filter((v) => v < S0).length / finalValues.length).toFixed(4)
+  );
+
+  return { p10, p25, p50, p75, p90, days: horizonDays, initialValue: S0, var95, cvar95, probabilityOfLoss };
 }
 
 // ── Markowitz / HRP Portfolio Optimization (#39) ─────────────────────────────

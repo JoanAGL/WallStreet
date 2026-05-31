@@ -299,6 +299,85 @@ describe("runMonteCarlo", () => {
   });
 });
 
+// ── runMonteCarlo — CVaR fields ───────────────────────────────────────────────
+
+describe("runMonteCarlo — CVaR and risk metrics", () => {
+  it("var95 and cvar95 are non-negative", () => {
+    const result = runMonteCarlo(0.0005, 0.02, 10000, 252, 0, 500);
+    expect(result.var95).toBeGreaterThanOrEqual(0);
+    expect(result.cvar95).toBeGreaterThanOrEqual(0);
+  });
+
+  it("cvar95 >= var95 (tail average is at least as bad as the cut-off)", () => {
+    const result = runMonteCarlo(0.0005, 0.02, 10000, 252, 0, 500);
+    expect(result.cvar95).toBeGreaterThanOrEqual(result.var95);
+  });
+
+  it("probabilityOfLoss is between 0 and 1", () => {
+    const result = runMonteCarlo(0.0005, 0.02, 10000, 252, 0, 500);
+    expect(result.probabilityOfLoss).toBeGreaterThanOrEqual(0);
+    expect(result.probabilityOfLoss).toBeLessThanOrEqual(1);
+  });
+
+  it("high-drift scenario has lower probabilityOfLoss than high-vol low-drift", () => {
+    const bull = runMonteCarlo(0.002, 0.01, 10000, 252, 0, 500);
+    const bear = runMonteCarlo(-0.001, 0.03, 10000, 252, 0, 500);
+    expect(bull.probabilityOfLoss).toBeLessThan(bear.probabilityOfLoss);
+  });
+});
+
+// ── runStressTests ────────────────────────────────────────────────────────────
+
+import { runStressTests } from "../portfolioMath";
+
+describe("runStressTests", () => {
+  const S0 = 100_000;
+  const annualMu = 0.08;
+
+  it("returns 5 scenarios", () => {
+    const results = runStressTests(S0, annualMu);
+    expect(results).toHaveLength(5);
+  });
+
+  it("finalValue + portfolioLoss = portfolioValue for each scenario", () => {
+    const results = runStressTests(S0, annualMu);
+    results.forEach((r) => {
+      expect(r.finalValue + r.portfolioLoss).toBeCloseTo(S0, 0);
+    });
+  });
+
+  it("portfolioLoss is positive (represents a loss)", () => {
+    const results = runStressTests(S0, annualMu);
+    results.forEach((r) => expect(r.portfolioLoss).toBeGreaterThan(0));
+  });
+
+  it("2008 crash has highest drawdown among scenarios", () => {
+    const results = runStressTests(S0, annualMu);
+    const crash2008 = results.find((r) => r.scenario.includes("2008"))!;
+    results.forEach((r) => {
+      expect(crash2008.drawdown).toBeGreaterThanOrEqual(r.drawdown);
+    });
+  });
+
+  it("recoveryDays is positive or null when annualMu > 0 (null means >5y recovery)", () => {
+    const results = runStressTests(S0, 0.08);
+    results.forEach((r) => {
+      // null is valid: large drawdowns (e.g. 2008 -56%) take >5 years at 8% drift
+      if (r.recoveryDays !== null) {
+        expect(r.recoveryDays).toBeGreaterThan(0);
+      }
+    });
+    // At least one moderate scenario (COVID -34%) should have a finite recovery
+    const finite = results.filter((r) => r.recoveryDays !== null);
+    expect(finite.length).toBeGreaterThan(0);
+  });
+
+  it("recoveryDays is null when annualMu <= 0", () => {
+    const results = runStressTests(S0, 0);
+    results.forEach((r) => expect(r.recoveryDays).toBeNull());
+  });
+});
+
 // ── detectHarvestOpportunities ────────────────────────────────────────────────
 
 describe("detectHarvestOpportunities", () => {

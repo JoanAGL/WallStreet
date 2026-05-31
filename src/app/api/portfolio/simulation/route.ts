@@ -3,15 +3,20 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getStocksWithAnalysis } from "@/repositories/stockRepository";
 import { getHistoricalCloses } from "@/services/marketDataService";
-import { runMonteCarlo } from "@/lib/portfolioMath";
+import { runMonteCarlo, runStressTests } from "@/lib/portfolioMath";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Computes daily mu and sigma from newest-first closes arrays.
+ * Reverses each series before computing returns so the direction is correct.
+ */
 function dailyStats(allCloses: number[][]): { mu: number; sigma: number } {
   const allReturns: number[] = [];
   for (const closes of allCloses) {
-    for (let i = 1; i < closes.length; i++) {
-      allReturns.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+    const ordered = closes.slice().reverse(); // oldest-first
+    for (let i = 1; i < ordered.length; i++) {
+      allReturns.push((ordered[i] - ordered[i - 1]) / ordered[i - 1]);
     }
   }
   if (allReturns.length === 0) return { mu: 0.0003, sigma: 0.015 };
@@ -57,7 +62,6 @@ export async function POST(req: NextRequest) {
 
   const { mu, sigma } = dailyStats(allCloses);
 
-  // Portfolio value: sum of current positions, or user-supplied override
   let S0 = body.portfolioValue ?? 0;
   if (!S0) {
     S0 = withAnalysis.reduce((sum, s) => {
@@ -66,8 +70,12 @@ export async function POST(req: NextRequest) {
       return sum + price * qty;
     }, 0);
   }
-  if (S0 <= 0) S0 = 10000; // sensible default
+  if (S0 <= 0) S0 = 10000;
 
-  const result = runMonteCarlo(mu, sigma, S0, tradingDays, monthlyContribution, 1000);
-  return NextResponse.json({ ...result, mu, sigma });
+  const [monteCarlo, stressTests] = await Promise.all([
+    Promise.resolve(runMonteCarlo(mu, sigma, S0, tradingDays, monthlyContribution, 1000)),
+    Promise.resolve(runStressTests(S0, mu * 252)),
+  ]);
+
+  return NextResponse.json({ ...monteCarlo, mu, sigma, stressTests });
 }
