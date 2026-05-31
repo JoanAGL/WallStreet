@@ -2,13 +2,12 @@ import { getCurrentQuote, getHistoricalCloses } from "./marketDataService";
 import { calculateIndicators } from "./technicalAnalysisService";
 import { analyzeNewsForTicker, fetchArticlesForTicker, batchAnalyzeSentiment } from "./newsAnalysisService";
 import type { DataIssue, NewsAnalysis } from "./newsAnalysisService";
-import { generateAllHorizonsAnalysis, batchGenerateAllHorizons, FALLBACK_HORIZON } from "./aiAnalysisService";
+import { batchGenerateAllHorizons, FALLBACK_HORIZON } from "./aiAnalysisService";
 import type { AllHorizonsAIAnalysis, HorizonAnalysis, BatchStockInput } from "./aiAnalysisService";
 import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore } from "./quantitativeService";
 import { getGlobalContext } from "./macroService";
 import type { MacroGlobalContext } from "./macroService";
 import { EarningsService } from "./earningsService";
-import type { EarningsGuidanceInsight } from "@/types/financial";
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import type { AllFundamentals } from "@/lib/yahooFinanceClient";
 import {
