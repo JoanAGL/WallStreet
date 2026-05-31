@@ -59,9 +59,10 @@ export class CircuitBreaker {
       this.lastFailureAt = Date.now();
       if (this.failures >= this.threshold) {
         this.state = "OPEN";
+        const reason = err instanceof Error ? err.message : String(err);
         console.error(
           `[CircuitBreaker:${this.name}] ${this.failures} failures → OPEN. ` +
-          `Cooldown ${this.timeoutMs / 1000}s`
+          `Last error: ${reason}. Cooldown ${this.timeoutMs / 1000}s`
         );
       }
       // Always return fallback on error — caller never sees an unhandled throw
