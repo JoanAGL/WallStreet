@@ -41,10 +41,18 @@ export interface OptimizationResult {
 
 // ── Correlation Matrix (#36) ─────────────────────────────────────────────────
 
+/**
+ * Computes chronological daily returns (oldest→newest) from a closes array
+ * that is ordered newest-first (closes[0] = most recent), as returned by
+ * Yahoo Finance / Finnhub. Reversing before the loop corrects the sign so
+ * that rising assets produce positive returns and Sharpe ratios.
+ */
 export function dailyReturns(closes: number[]): number[] {
   const ret: number[] = [];
-  for (let i = 1; i < closes.length; i++) {
-    ret.push((closes[i] - closes[i - 1]) / closes[i - 1]);
+  // Reverse: ordered[0] = oldest, ordered[n-1] = newest
+  const ordered = closes.slice().reverse();
+  for (let i = 1; i < ordered.length; i++) {
+    ret.push((ordered[i] - ordered[i - 1]) / ordered[i - 1]);
   }
   return ret;
 }
@@ -283,6 +291,12 @@ export interface BlackLittermanView {
   expectedAnnualReturn: number;
   /** Analyst confidence 0–1 (1 = certainty, lower = more uncertainty) */
   confidence: number;
+  /**
+   * Optional: relative view. If set, the view means "ticker outperforms vsTicker
+   * by expectedAnnualReturn". P row = [+1 at ticker, -1 at vsTicker].
+   * If omitted: absolute view on ticker alone.
+   */
+  vsTicker?: string;
 }
 
 export interface BlackLittermanResult extends OptimizationResult {
@@ -390,60 +404,72 @@ export function runBlackLitterman(
   const totalValue = Object.values(currentValues).reduce((s, v) => s + v, 0);
   const w_m = tickers.map((t) => (currentValues[t] ?? 0) / (totalValue || 1));
 
-  // Fallback helper — Markowitz result
+  // Filter views: both ticker and vsTicker must exist in the portfolio
+  const validViews = views.filter(
+    (v) =>
+      tickerIdx[v.ticker] !== undefined &&
+      (v.vsTicker === undefined || tickerIdx[v.vsTicker] !== undefined)
+  );
+
+  // Fallback to standard Markowitz; reports only the validated views
   const markowitz = (): BlackLittermanResult => {
     const base = runPortfolioOptimization(historicalData, currentValues, riskFreeRate);
     return {
       ...base,
       blPosteriorMeans: Object.fromEntries(tickers.map((t, i) => [t, mus[i] * 252])),
-      views,
+      views: validViews,
     };
   };
 
-  const validViews = views.filter((v) => tickerIdx[v.ticker] !== undefined);
   if (validViews.length === 0) return markowitz();
 
-  // Equilibrium prior: π = δ * Σ_ann * w_m
+  // Equilibrium prior: π = δ * Σ_ann * w_m  (N-vector, annualized)
   const covAnn = matScale(covShrunk.map((row) => [...row]), 252);
   const pi = matVec(covAnn, w_m).map((v) => v * delta);
 
-  // Pick-matrix P (numViews × k): absolute views → identity pick per ticker
+  // P matrix (K × N):
+  //   Absolute view on ticker i  → P[v][i] = +1
+  //   Relative view ticker i vs j → P[v][i] = +1, P[v][j] = -1  (i outperforms j)
   const P: number[][] = validViews.map((v) => {
     const row = new Array<number>(k).fill(0);
-    const idx = tickerIdx[v.ticker];
-    if (idx !== undefined) row[idx] = 1;
+    row[tickerIdx[v.ticker]] = 1;
+    if (v.vsTicker !== undefined) {
+      row[tickerIdx[v.vsTicker]] = -1;
+    }
     return row;
   });
 
-  // Q vector: expected annual returns as column matrix
+  // Q (K × 1): expected annual returns per view
   const Q: number[][] = validViews.map((v) => [v.expectedAnnualReturn]);
 
-  // Ω: view uncertainty, diagonal. Higher confidence → lower uncertainty.
-  const PcovPt = matMul(matMul(P, covAnn), transpose(P));
+  // τΣ (N × N)
+  const tauSigma = matScale(covAnn, tau);
+
+  // Ω (K × K diagonal): uncertainty ∝ (1-conf)/conf · τ · P(τΣ)Pᵀ diagonal
+  // Using Woodbury form avoids inverting the N×N tauSigma — only K×K needed.
+  const PtauSigmaPt = matMul(matMul(P, tauSigma), transpose(P)); // K×K
   const Omega: number[][] = Array.from({ length: validViews.length }, (_, i) =>
     Array.from({ length: validViews.length }, (_, j) => {
       if (i !== j) return 0;
       const conf = Math.max(0.01, Math.min(0.99, validViews[i].confidence));
-      return ((1 - conf) / conf) * tau * PcovPt[i][i];
+      return ((1 - conf) / conf) * PtauSigmaPt[i][i];
     })
   );
 
-  // BL posterior: μ_BL = [(τΣ)⁻¹ + P'Ω⁻¹P]⁻¹ · [(τΣ)⁻¹π + P'Ω⁻¹Q]
-  const tauSigmaInv = matInverse(matScale(covAnn, tau));
-  const OmegaInv = matInverse(Omega);
-  if (!tauSigmaInv || !OmegaInv) return markowitz();
+  // Woodbury identity form (He & Litterman 1999):
+  //   μ_BL = π + τΣ · Pᵀ · (P · τΣ · Pᵀ + Ω)⁻¹ · (Q - P · π)
+  // Only requires one K×K inverse — numerically superior to information form for N > K.
+  const inner = matAdd(PtauSigmaPt, Omega);           // K×K
+  const innerInv = matInverse(inner);
+  if (!innerInv) return markowitz();
 
-  const Pt = transpose(P);
-  const A = matAdd(tauSigmaInv, matMul(matMul(Pt, OmegaInv), P));
-  const AInv = matInverse(A);
-  if (!AInv) return markowitz();
+  const piVec: number[][] = pi.map((v) => [v]);
+  const Ppi = matMul(P, piVec);                                     // K×1
+  const residual = Ppi.map((row, i) => [Q[i][0] - row[0]]);        // K×1: Q - P·π
+  const tauSigmaPt = matMul(tauSigma, transpose(P));                // N×K
+  const correction = matMul(tauSigmaPt, matMul(innerInv, residual)); // N×1
 
-  const piMat: number[][] = pi.map((v) => [v]);
-  const b = matAdd(
-    matMul(tauSigmaInv, piMat),
-    matMul(matMul(Pt, OmegaInv), Q)
-  );
-  const muBL = matMul(AInv, b).map((row) => row[0]); // annualized BL posterior means
+  const muBL = pi.map((v, i) => v + correction[i][0]); // annualized BL posterior means
 
   // Optimize with BL posterior means (convert to daily)
   const muBLDaily = muBL.map((v) => v / 252);
