@@ -204,7 +204,7 @@ function portfolioReturn(weights: number[], mus: number[]): number {
 }
 
 // Ledoit-Wolf constant-correlation shrinkage (simplified)
-function shrinkCovariance(cov: number[][], n: number, alpha = 0.2): number[][] {
+function shrinkCovariance(cov: number[][], alpha = 0.2): number[][] {
   const k = cov.length;
   const variances = cov.map((row, i) => row[i]);
   const avgCorr =
@@ -275,6 +275,208 @@ function projectSimplex(v: number[]): number[] {
   return v.map((x) => Math.max(x - theta, 0));
 }
 
+// ── Black-Litterman Model ─────────────────────────────────────────────────────
+
+export interface BlackLittermanView {
+  ticker: string;
+  /** View on expected annual return, e.g. 0.12 for +12% */
+  expectedAnnualReturn: number;
+  /** Analyst confidence 0–1 (1 = certainty, lower = more uncertainty) */
+  confidence: number;
+}
+
+export interface BlackLittermanResult extends OptimizationResult {
+  /** BL posterior annualized means per ticker */
+  blPosteriorMeans: Record<string, number>;
+  /** Views fed into the model */
+  views: BlackLittermanView[];
+}
+
+// ── Matrix helpers (pure, internal) ──────────────────────────────────────────
+
+function matMul(A: number[][], B: number[][]): number[][] {
+  const m = A.length, p = A[0].length, n = B[0].length;
+  return Array.from({ length: m }, (_, i) =>
+    Array.from({ length: n }, (_, j) =>
+      Array.from({ length: p }, (_, l) => A[i][l] * B[l][j]).reduce((s, v) => s + v, 0)
+    )
+  );
+}
+
+function matAdd(A: number[][], B: number[][]): number[][] {
+  return A.map((row, i) => row.map((v, j) => v + B[i][j]));
+}
+
+function matScale(A: number[][], s: number): number[][] {
+  return A.map((row) => row.map((v) => v * s));
+}
+
+function transpose(A: number[][]): number[][] {
+  return A[0].map((_, j) => A.map((row) => row[j]));
+}
+
+/** Gauss-Jordan matrix inverse. Returns null for singular matrices (n ≤ 25). */
+function matInverse(A: number[][]): number[][] | null {
+  const n = A.length;
+  const aug = A.map((row, i) =>
+    [...row, ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))]
+  );
+
+  for (let col = 0; col < n; col++) {
+    let maxRow = col;
+    for (let row = col + 1; row < n; row++) {
+      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
+    }
+    [aug[col], aug[maxRow]] = [aug[maxRow], aug[col]];
+
+    const pivot = aug[col][col];
+    if (Math.abs(pivot) < 1e-12) return null;
+
+    for (let j = 0; j < 2 * n; j++) aug[col][j] /= pivot;
+    for (let row = 0; row < n; row++) {
+      if (row === col) continue;
+      const f = aug[row][col];
+      for (let j = 0; j < 2 * n; j++) aug[row][j] -= f * aug[col][j];
+    }
+  }
+  return aug.map((row) => row.slice(n));
+}
+
+/**
+ * Black-Litterman portfolio optimization.
+ *
+ * Prior: market-equilibrium returns (reverse-optimized from portfolio weights).
+ * Views: absolute expected-return views on individual tickers, weighted by confidence.
+ * Posterior: Bayesian blend of prior and views → fed into variance minimizer.
+ *
+ * Falls back to standard Markowitz if views are empty or matrices are singular.
+ *
+ * @param tau   Scaling parameter for prior uncertainty (default 0.05, standard)
+ * @param delta Risk-aversion coefficient (default 2.5, matches institutional literature)
+ */
+export function runBlackLitterman(
+  historicalData: Record<string, number[]>,
+  currentValues: Record<string, number>,
+  views: BlackLittermanView[],
+  tau = 0.05,
+  delta = 2.5,
+  riskFreeRate = 0.035 / 252
+): BlackLittermanResult {
+  const tickers = Object.keys(historicalData);
+  const k = tickers.length;
+  const tickerIdx = Object.fromEntries(tickers.map((t, i) => [t, i]));
+  const allReturns = tickers.map((t) => dailyReturns(historicalData[t]));
+  const n = allReturns[0].length;
+
+  const mus = allReturns.map((r) => r.reduce((s, v) => s + v, 0) / r.length);
+
+  // Covariance matrix (daily) with Ledoit-Wolf shrinkage
+  const cov: number[][] = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+  for (let i = 0; i < k; i++) {
+    for (let j = i; j < k; j++) {
+      let c = 0;
+      const len = Math.min(allReturns[i].length, allReturns[j].length);
+      for (let t = 0; t < len; t++) {
+        c += (allReturns[i][t] - mus[i]) * (allReturns[j][t] - mus[j]);
+      }
+      c /= n - 1;
+      cov[i][j] = c;
+      cov[j][i] = c;
+    }
+  }
+  const covShrunk = shrinkCovariance(cov);
+
+  // Market weights from current values
+  const totalValue = Object.values(currentValues).reduce((s, v) => s + v, 0);
+  const w_m = tickers.map((t) => (currentValues[t] ?? 0) / (totalValue || 1));
+
+  // Fallback helper — Markowitz result
+  const markowitz = (): BlackLittermanResult => {
+    const base = runPortfolioOptimization(historicalData, currentValues, riskFreeRate);
+    return {
+      ...base,
+      blPosteriorMeans: Object.fromEntries(tickers.map((t, i) => [t, mus[i] * 252])),
+      views,
+    };
+  };
+
+  const validViews = views.filter((v) => tickerIdx[v.ticker] !== undefined);
+  if (validViews.length === 0) return markowitz();
+
+  // Equilibrium prior: π = δ * Σ_ann * w_m
+  const covAnn = matScale(covShrunk.map((row) => [...row]), 252);
+  const pi = matVec(covAnn, w_m).map((v) => v * delta);
+
+  // Pick-matrix P (numViews × k): absolute views → identity pick per ticker
+  const P: number[][] = validViews.map((v) => {
+    const row = new Array<number>(k).fill(0);
+    const idx = tickerIdx[v.ticker];
+    if (idx !== undefined) row[idx] = 1;
+    return row;
+  });
+
+  // Q vector: expected annual returns as column matrix
+  const Q: number[][] = validViews.map((v) => [v.expectedAnnualReturn]);
+
+  // Ω: view uncertainty, diagonal. Higher confidence → lower uncertainty.
+  const PcovPt = matMul(matMul(P, covAnn), transpose(P));
+  const Omega: number[][] = Array.from({ length: validViews.length }, (_, i) =>
+    Array.from({ length: validViews.length }, (_, j) => {
+      if (i !== j) return 0;
+      const conf = Math.max(0.01, Math.min(0.99, validViews[i].confidence));
+      return ((1 - conf) / conf) * tau * PcovPt[i][i];
+    })
+  );
+
+  // BL posterior: μ_BL = [(τΣ)⁻¹ + P'Ω⁻¹P]⁻¹ · [(τΣ)⁻¹π + P'Ω⁻¹Q]
+  const tauSigmaInv = matInverse(matScale(covAnn, tau));
+  const OmegaInv = matInverse(Omega);
+  if (!tauSigmaInv || !OmegaInv) return markowitz();
+
+  const Pt = transpose(P);
+  const A = matAdd(tauSigmaInv, matMul(matMul(Pt, OmegaInv), P));
+  const AInv = matInverse(A);
+  if (!AInv) return markowitz();
+
+  const piMat: number[][] = pi.map((v) => [v]);
+  const b = matAdd(
+    matMul(tauSigmaInv, piMat),
+    matMul(matMul(Pt, OmegaInv), Q)
+  );
+  const muBL = matMul(AInv, b).map((row) => row[0]); // annualized BL posterior means
+
+  // Optimize with BL posterior means (convert to daily)
+  const muBLDaily = muBL.map((v) => v / 252);
+  const optimalWeights = minimizeVariance(muBLDaily, covShrunk, null);
+  const currentWeights = w_m;
+
+  const annFactor = 252;
+  const sqrt252 = Math.sqrt(annFactor);
+  const annRet = (w: number[]) => portfolioReturn(w, muBLDaily) * annFactor;
+  const annVol = (w: number[]) => Math.sqrt(portfolioVariance(w, covShrunk)) * sqrt252;
+  const sharpe = (ret: number, vol: number) =>
+    vol > 0 ? (ret - riskFreeRate * annFactor) / vol : 0;
+
+  const cRet = annRet(currentWeights);
+  const oRet = annRet(optimalWeights);
+  const cVol = annVol(currentWeights);
+  const oVol = annVol(optimalWeights);
+
+  return {
+    tickers,
+    currentWeights,
+    optimalWeights,
+    currentReturn: cRet,
+    optimalReturn: oRet,
+    currentVol: cVol,
+    optimalVol: oVol,
+    currentSharpe: sharpe(cRet, cVol),
+    optimalSharpe: sharpe(oRet, oVol),
+    blPosteriorMeans: Object.fromEntries(tickers.map((t, i) => [t, muBL[i]])),
+    views: validViews,
+  };
+}
+
 export function runPortfolioOptimization(
   historicalData: Record<string, number[]>,
   currentValues: Record<string, number>,  // ticker -> market value
@@ -303,7 +505,7 @@ export function runPortfolioOptimization(
   }
 
   // Shrink covariance
-  const covShrunk = shrinkCovariance(cov, n);
+  const covShrunk = shrinkCovariance(cov);
 
   // Current weights by market value
   const totalValue = Object.values(currentValues).reduce((s, v) => s + v, 0);

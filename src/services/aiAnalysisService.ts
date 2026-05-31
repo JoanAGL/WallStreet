@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { geminiChat } from "@/lib/geminiClient";
 import type { TechnicalIndicators } from "./technicalAnalysisService";
 import type { NewsAnalysis, Sentiment } from "./newsAnalysisService";
@@ -438,42 +439,36 @@ confidenceScore: 0-100 basado en la convergencia de señales cuantitativas. Nunc
 executionPriceLimit: nivel técnico de soporte/resistencia relevante en USD (usa SMA, Fibonacci o niveles de precio).`;
 }
 
-function parsePrescriptiveAction(raw: unknown): PrescriptiveAction {
-  if (!raw || typeof raw !== "object") return FALLBACK_HORIZON.prescriptiveAction;
-  const r = raw as Record<string, unknown>;
-  const validActions: TradingAction[] = ["COMPRA", "VENTA", "MANTENER", "REDUCIR"];
-  const action = validActions.includes(r.action as TradingAction)
-    ? (r.action as TradingAction)
-    : "MANTENER";
-  return {
-    action,
-    confidenceScore:         typeof r.confidenceScore === "number" ? Math.min(100, Math.max(0, Math.round(r.confidenceScore))) : 0,
-    executionPriceLimit:     typeof r.executionPriceLimit === "number" ? r.executionPriceLimit : 0,
-    quantitativeJustification: typeof r.quantitativeJustification === "string" && r.quantitativeJustification.trim()
-                               ? r.quantitativeJustification : FALLBACK_HORIZON.prescriptiveAction.quantitativeJustification,
-    estimatedHorizonDays:    typeof r.estimatedHorizonDays === "number" ? r.estimatedHorizonDays : 0,
-  };
-}
+// ── Zod schemas — strict validation of Gemini JSON output ────────────────────
+// .catch() on each field means a bad value degrades gracefully to the fallback
+// instead of propagating an error or silently accepting wrong data.
 
-function parseHorizonBlock(raw: Record<string, unknown> | undefined): HorizonAnalysis {
-  if (!raw) return FALLBACK_HORIZON;
-  const label = raw.scenarioLabel;
-  return {
-    analysisText:          typeof raw.analysisText === "string" && raw.analysisText.trim()
-                             ? raw.analysisText : FALLBACK_HORIZON.analysisText,
-    scenarioLabel:         label === "Positivo" || label === "Negativo" || label === "Neutral"
-                             ? label : "Neutral",
-    scenarioJustification: typeof raw.scenarioJustification === "string" && raw.scenarioJustification.trim()
-                             ? raw.scenarioJustification : FALLBACK_HORIZON.scenarioJustification,
-    divergenceAlert:       typeof raw.divergenceAlert === "boolean" ? raw.divergenceAlert : false,
-    horizonMatch:          typeof raw.horizonMatch === "string" ? raw.horizonMatch : "",
-    keyMetrics:            Array.isArray(raw.keyMetrics)
-                             ? raw.keyMetrics.filter((k): k is string => typeof k === "string")
-                             : [],
-    portfolioAlert:        typeof raw.portfolioAlert === "string" ? raw.portfolioAlert : "",
-    prescriptiveAction:    parsePrescriptiveAction(raw.prescriptiveAction),
-  };
-}
+const ZPrescriptiveAction = z.object({
+  action: z.enum(["COMPRA", "VENTA", "MANTENER", "REDUCIR"]).catch("MANTENER"),
+  confidenceScore: z.number().catch(0).transform((v) => Math.min(100, Math.max(0, Math.round(v)))),
+  executionPriceLimit: z.number().catch(0),
+  quantitativeJustification: z.string().min(1).catch(
+    FALLBACK_HORIZON.prescriptiveAction.quantitativeJustification
+  ),
+  estimatedHorizonDays: z.number().catch(0),
+});
+
+const ZHorizonAnalysis = z.object({
+  analysisText:          z.string().min(1).catch(FALLBACK_HORIZON.analysisText),
+  scenarioLabel:         z.enum(["Positivo", "Neutral", "Negativo"]).catch("Neutral"),
+  scenarioJustification: z.string().min(1).catch(FALLBACK_HORIZON.scenarioJustification),
+  divergenceAlert:       z.boolean().catch(false),
+  horizonMatch:          z.string().catch(""),
+  keyMetrics:            z.array(z.string()).catch([]),
+  portfolioAlert:        z.string().catch(""),
+  prescriptiveAction:    ZPrescriptiveAction.catch(FALLBACK_HORIZON.prescriptiveAction),
+});
+
+const ZAllHorizons = z.object({
+  shortTerm:  ZHorizonAnalysis.catch(FALLBACK_HORIZON),
+  mediumTerm: ZHorizonAnalysis.catch(FALLBACK_HORIZON),
+  longTerm:   ZHorizonAnalysis.catch(FALLBACK_HORIZON),
+});
 
 export async function generateAllHorizonsAnalysis(
   ticker: string,
@@ -502,16 +497,12 @@ export async function generateAllHorizonsAnalysis(
   });
 
   try {
-    const parsed = JSON.parse(raw) as {
-      shortTerm?:  Record<string, unknown>;
-      mediumTerm?: Record<string, unknown>;
-      longTerm?:   Record<string, unknown>;
-    };
-    return {
-      shortTerm:  parseHorizonBlock(parsed.shortTerm),
-      mediumTerm: parseHorizonBlock(parsed.mediumTerm),
-      longTerm:   parseHorizonBlock(parsed.longTerm),
-    };
+    const result = ZAllHorizons.safeParse(JSON.parse(raw));
+    if (!result.success) {
+      console.warn(`[aiAnalysis] Zod validation failed for ${ticker}:`, result.error.flatten());
+      return { shortTerm: FALLBACK_HORIZON, mediumTerm: FALLBACK_HORIZON, longTerm: FALLBACK_HORIZON };
+    }
+    return result.data as AllHorizonsAIAnalysis;
   } catch {
     return { shortTerm: FALLBACK_HORIZON, mediumTerm: FALLBACK_HORIZON, longTerm: FALLBACK_HORIZON };
   }
