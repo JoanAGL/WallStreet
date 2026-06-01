@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  /* App shell — dark fintech palette */
-  --background:    #161C2C;   /* slightly darker than header so header reads as a distinct layer */
+  /* App shell — medium-dark fintech palette */
+  --background:    #2A3348;   /* medium-dark blue-gray, lighter than header */
   --foreground:    #E2E8F0;   /* slate-200 — main text on dark bg */
 
   /* Header */
@@ -12,10 +12,10 @@
   --header-border: #2D3748;
 
   /* Cards */
-  --card-bg:       #1E2838;   /* slightly lighter than background */
-  --card-inner:    #252F44;   /* nested panels (MetricBox, TxRow) */
-  --card-border:   #2D3748;
-  --card-border-inner: #243044;
+  --card-bg:       #344059;   /* slightly lighter than background */
+  --card-inner:    #3B4967;   /* nested panels (MetricBox, TxRow) */
+  --card-border:   #3D506E;
+  --card-border-inner: #344060;
 }
 
 body {
