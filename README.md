@@ -67,14 +67,48 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 - **Benchmark de cartera** — Comparación de rendimiento vs índice de referencia
 - **Exportación CSV** — `GET /api/portfolio/export?format=csv` descarga un CSV con 34 campos por acción: precio, cambio %, escenario activo, confidenceScore, indicadores técnicos (RSI14, SMA20/50, ATR14, volumen relativo), escenarios por horizonte (corto/medio/largo plazo), divergencia precio/RSI, datos de posición (precio compra, cantidad, coste base, valor actual, P&L en USD y %), y timestamp de generación. Requiere sesión autenticada; solo exporta datos del usuario en sesión. Botón «↓ CSV» en el resumen de cartera
 - **Sistema de transacciones (WAC)** — Motor completo de registro de compras y ventas por posición usando el método de Coste Medio Ponderado (Weighted Average Cost). Cada transacción almacena: tipo (BUY/SELL), acciones, precio, fecha (opcional) y notas (opcional). El servicio calcula en tiempo real: precio medio WAC dinámico (recalculado con cada BUY en orden cronológico), precio medio de venta, coste base abierto, valor actual, PnL no realizado ($ y %), PnL realizado ($ y %), precio de equilibrio, días en cartera (desde primera transacción), rentabilidad anualizada CAGR y peso en cartera (%). API: `POST /api/portfolio/transactions` (registrar BUY/SELL), `GET /api/portfolio/transactions?stockId=xxx&currentPrice=yyy` (métricas completas), `PATCH /api/portfolio/transactions/[id]` (editar transacción), `DELETE /api/portfolio/transactions/[id]` (eliminar). Panel «Transacciones» plegable en cada StockCard con formulario inline (BUY/SELL toggle), métricas compactas y lista de operaciones con edición y eliminación
-- **Historial de ventas** — `/dashboard/history` muestra cada transacción SELL ejecutada con el precio medio WAC en el momento de la venta, precio de venta, profit en $ y %, capital invertido y recaudado por operación. `getTransactionHistory()` en `transactionService` recalcula el WAC cronológico para cada venta y extrae el profit individual real. Permite eliminar ventas del historial (recalculo automático). Agrega capital total invertido, recaudado, profit absoluto y ROI global
+- **Historial de ventas** — `/dashboard/history` muestra cada transacción SELL ejecutada con el precio medio WAC en el momento de la venta, precio de venta, profit en $ y %, capital invertido y recaudado por operación. `getTransactionHistory()` en `transactionService` recalcula el WAC cronológico para cada venta y extrae el profit individual real. Fusiona automáticamente entradas de `Transaction` (origen `"transaction"`) con entradas manuales de `ManualSellEntry` (origen `"manual"`), ordenadas por fecha descendente. Cada entrada se puede eliminar individualmente; las de tipo `transaction` recalculan el WAC automáticamente. Agrega capital total invertido, recaudado, profit absoluto y ROI global
+- **Ventas históricas manuales** — Formulario en `/dashboard/history` para registrar posiciones compradas y vendidas antes de usar el sistema: ticker libre (no necesita estar en el dashboard), número de acciones, precio medio de compra, precio de venta, fecha y notas opcionales. Preview en tiempo real de invertido / recaudado / profit / ROI antes de guardar. Almacenadas en `ManualSellEntry` con relación directa a `User` (sin Stock). API: `POST /api/portfolio/history/manual` y `DELETE /api/portfolio/history/manual/[id]`. Aparecen en el historial con badge «manual» para distinguirlas de las que vienen del TransactionPanel
 - **Vista global de rendimiento** — `/dashboard/portfolio` muestra todas las posiciones con transacciones, agregados globales (valor actual total, coste base total, PnL no realizado + %, PnL realizado, PnL total) y detalle por posición con todas las métricas; accesible desde «Rendimiento →» en el resumen de cartera
 
 ### Diseño visual
-- **Paleta fintech** — Header oscuro `#1B2130` estilo MyInvestor; fondo de app `#EEF0F4` gris frío estilo DeGiro; tarjetas `bg-slate-50` con borde `slate-200` para una paleta uniformemente gris sin contraste blanco puro
-- **Tipografía** — Inter via `next/font/google`; antialiasing activado; scrollbar fino personalizado
-- **Badges de perfil de riesgo** — Pills semi-transparentes (sky/amber/red sobre fondo oscuro) adaptados al header oscuro
-- **Sin dark-mode automático** — Estilos fijos para evitar problemas de contraste en sistemas con preferencia oscura
+
+Tema oscuro fintech inspirado en MyInvestor / DeGiro, implementado mediante un design system con tokens CSS y estilos inline semánticos.
+
+**Paleta de superficies (cuatro capas de profundidad):**
+
+| Layer | Token CSS | Hex | Uso |
+|---|---|---|---|
+| Shell | `--background` | `#2A3348` | fondo de página |
+| Header | `--header-bg` | `#1B2130` | barra sticky superior |
+| Card | `--card-bg` | `#344059` | tarjetas primarias |
+| Inner | `--card-inner` | `#3B4967` | paneles anidados, inputs, MetricBox |
+| Raised | `--card-raised` | `#435474` | hover fills |
+
+**Tokens semánticos de color** — señales financieras siempre por RGBA para funcionar sobre cualquier superficie:
+
+| Señal | Token | Color |
+|---|---|---|
+| Positivo / COMPRA | `--pos-bg / --pos-bd` | `rgba(16,163,74,...)` |
+| Negativo / VENTA | `--neg-bg / --neg-bd` | `rgba(239,68,68,...)` |
+| Alerta / REDUCIR | `--warn-bg / --warn-bd` | `rgba(245,158,11,...)` |
+| Información | `--info-bg / --info-bd` | `rgba(37,99,235,...)` |
+
+**Rampa de texto:** `--fg-1` (#F1F5F9) → `--fg-5` (#7A8BA0) para titulares, cuerpo, labels y metadatos respectivamente.
+
+**Componentes con estilos inline semánticos** (no dependen de las clases Tailwind remapeadas):
+- Banners de escenario Positivo/Neutral/Negativo — RGBA verde/amber/rojo
+- Badges de divergencia precio/RSI — RGBA rojo/verde según tipo bearish/bullish
+- `RiskBadge` — semi-transparente verde/amber/rojo con texto claro (`#4ADE80`/`#FCD34D`/`#F87171`)
+- `HorizonSelector` — activo: `rgba(37,99,235,.18)` + `#93C5FD`; inactivo: `var(--card-inner)`
+- `CorrelationMatrix` — celdas con colores sólidos data-viz (`#DCFCE7`/`#FEF9C3`/`#FECACA`) y texto oscuro legible
+- `PortfolioSummary` — borde y fondo del contenedor dinámico según sesgo alcista/bajista de la cartera
+- `TopMovers` — badge de ganancia `rgba(16,163,74,.12)` + `#4ADE80`
+- `Disclaimer` — estilo muted ℹ info en `var(--card-inner)`
+
+**Tipografía:** Inter via `next/font/google`, antialiased. Escala conservadora (máx. `text-2xl` para precio); jerarquía por peso + color, no por tamaño. Eyebrows en `uppercase + tracking-wide`.
+
+**Sin dark-mode automático** — estilos fijos para consistencia visual independientemente de la preferencia del sistema.
 
 ### Actualización de datos
 - **Actualización manual** — Botón en dashboard con caché de 4h; muestra resultado completo: actualizadas · en caché · con error (con tickers afectados)
@@ -128,10 +162,12 @@ src/
 │   │   │   ├── rebalance/        # POST: rebalanceo + tax harvesting
 │   │   │   ├── simulation/       # POST: Monte Carlo + stress tests
 │   │   │   ├── export/           # GET: exportación CSV de cartera (?format=csv)
-│   │   │   ├── sell/             # POST: registrar venta + cerrar/reducir posición
-│   │   │   ├── history/          # GET: historial de operaciones cerradas + ROI agregado
+│   │   │   ├── sell/             # POST: registrar venta + cerrar/reducir posición (legado)
+│   │   │   ├── history/
+│   │   │   │   └── manual/       # POST: nueva venta histórica manual
+│   │   │   │       └── [id]/     # DELETE: eliminar venta histórica manual
 │   │   │   ├── transactions/     # GET+POST: métricas WAC + registrar BUY/SELL
-│   │   │   └── transactions/[id] # DELETE: eliminar transacción
+│   │   │   └── transactions/[id] # PATCH+DELETE: editar/eliminar transacción
 │   │   ├── market/top-gainers/   # GET: top movers Finnhub
 │   │   ├── macro/flash/          # GET: contexto macro (caché 4h)
 │   │   ├── search/               # GET: búsqueda de tickers
@@ -153,16 +189,18 @@ src/
 │   ├── macroService.ts           # Contexto macro global (caché Supabase)
 │   ├── earningsService.ts        # Guidance de earnings (caché 30d)
 │   ├── quantitativeService.ts    # Sharpe, Kelly, GARCH, correlaciones, Fear&Greed, PEG Lynch
-│   ├── portfolioService.ts       # executeSell (motor de ventas), getClosedPerformance (ROI)
-│   ├── transactionService.ts     # WAC engine: calculatePositionMetrics, addTransaction, getPortfolioMetrics
+│   ├── portfolioService.ts       # executeSell (motor de ventas legado), getClosedPerformance
+│   ├── transactionService.ts     # WAC engine: calculatePositionMetrics, addTransaction,
+│   │                             #   getPortfolioMetrics, getTransactionHistory (merge WAC+manual)
 │   └── portfolioAIService.ts     # Análisis global de cartera
 ├── repositories/                 # Acceso a Prisma/PostgreSQL
 │   ├── stockRepository.ts
 │   ├── analysisRepository.ts
 │   ├── analysisHistoryRepository.ts
 │   ├── portfolioAnalysisRepository.ts
-│   ├── closedOperationRepository.ts  # CRUD de operaciones de venta cerradas
-│   └── transactionRepository.ts      # CRUD de transacciones BUY/SELL
+│   ├── closedOperationRepository.ts  # CRUD de operaciones de venta cerradas (legado)
+│   ├── transactionRepository.ts      # CRUD de transacciones BUY/SELL
+│   └── manualSellRepository.ts       # CRUD de ManualSellEntry (ventas históricas manuales)
 ├── lib/                          # Clientes externos y utilidades
 │   ├── geminiClient.ts           # Google Gemini (JSON mode, retries, STATIC_SYSTEM_INSTRUCTION)
 │   ├── withTimeout.ts            # Promise.race wrapper con clearTimeout en .finally()
@@ -188,22 +226,26 @@ src/
 │   └── prisma.ts                 # Singleton Prisma Client
 └── components/
     ├── dashboard/
-    │   ├── StockCard.tsx         # Tarjeta: precio, escenario, métricas, alertas
-    │   ├── AddStockForm.tsx      # Input de ticker con autocompletado
-    │   ├── UpdateButton.tsx      # Botón de actualización con feedback detallado
-    │   ├── StockUpdateMenu.tsx   # Actualización parcial por tipo (precio/técnicos/noticias)
-    │   ├── CorrelationMatrix.tsx # Heatmap de correlaciones con leyenda de colores
-    │   ├── TaxHarvestingPanel.tsx # Pérdidas latentes + ETF sugeridos por sector
-    │   ├── PortfolioSummary.tsx  # Resumen total: valor, P&L, allocación
-    │   ├── PortfolioBenchmark.tsx # Rendimiento vs benchmark
-    │   ├── PortfolioAIInsights.tsx # Análisis global generado por IA
-    │   ├── PriceChart.tsx        # Gráfico de precios históricos
-    │   ├── TopMovers.tsx         # Gainers/losers del mercado en tiempo real
-    │   ├── HorizonSelector.tsx   # Selector de horizonte de inversión por acción
-    │   ├── PurchaseDataEditor.tsx # Editor de precio/fecha/cantidad de compra
-    │   ├── RiskProfileBadge.tsx  # Badge visual del perfil de riesgo
-    │   └── RegeneratePortfolioButton.tsx # Regenera análisis global sin re-fetch de mercado
-    └── ui/                       # Componentes genéricos (Disclaimer, etc.)
+    │   ├── StockCard.tsx              # Tarjeta: precio, escenario, métricas, alertas (DS inline)
+    │   ├── TransactionPanel.tsx       # Panel plegable BUY/SELL WAC por acción
+    │   ├── AddManualSellForm.tsx      # Formulario venta histórica manual con preview live
+    │   ├── DeleteTransactionButton.tsx# Botón eliminar genérico (prop deleteUrl)
+    │   ├── AddStockForm.tsx           # Input de ticker con autocompletado
+    │   ├── UpdateButton.tsx           # Botón de actualización con feedback detallado
+    │   ├── StockUpdateMenu.tsx        # Actualización parcial por tipo
+    │   ├── CorrelationMatrix.tsx      # Heatmap celdas sólidas data-viz + inline styles DS
+    │   ├── TaxHarvestingPanel.tsx     # Pérdidas latentes + ETF sugeridos por sector
+    │   ├── PortfolioSummary.tsx       # Resumen con borde RGBA dinámico según sesgo cartera
+    │   ├── PortfolioBenchmark.tsx     # Rendimiento vs benchmark
+    │   ├── PortfolioAIInsights.tsx    # Análisis global generado por IA
+    │   ├── PriceChart.tsx             # Gráfico de precios históricos
+    │   ├── TopMovers.tsx              # Gainers del mercado (badge RGBA verde)
+    │   ├── HorizonSelector.tsx        # Selector horizonte (activo: RGBA azul + #93C5FD)
+    │   ├── RiskProfileBadge.tsx       # Badge perfil de riesgo en header
+    │   └── RegeneratePortfolioButton.tsx
+    └── ui/
+        ├── RiskBadge.tsx              # Badge riesgo semi-transparente verde/amber/rojo
+        └── Disclaimer.tsx             # Aviso legal muted ℹ
 ```
 
 ### Pipeline de análisis
@@ -292,6 +334,14 @@ Transaction
   date? (optional acquisition/sale date) · notes? (free text)
   createdAt (@default now)
   Index: (stockId, createdAt DESC)
+
+ManualSellEntry
+  id (UUID) · userId → User (CASCADE, sin relación a Stock)
+  ticker · shares · avgBuyPrice · sellPrice
+  investedAmount · revenueAmount · profitAmount · profitPercentage
+  date (@default now) · notes? · createdAt (@default now)
+  Index: (userId, date DESC)
+  — Permite registrar ventas históricas de posiciones no gestionadas en el dashboard
 
 PortfolioAnalysis
   id · userId → User (unique)
