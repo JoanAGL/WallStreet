@@ -8,6 +8,7 @@ import HorizonSelector from "./HorizonSelector";
 import PurchaseDataEditor from "./PurchaseDataEditor";
 import StockUpdateMenu from "./StockUpdateMenu";
 import SellStockModal from "./SellStockModal";
+import TransactionPanel from "./TransactionPanel";
 import Link from "next/link";
 
 interface Props {
@@ -417,6 +418,13 @@ export default function StockCard({ stock }: Props) {
               </div>
             );
           })()}
+
+          {/* Panel de transacciones */}
+          <TransactionPanel
+            stockId={stock.id}
+            ticker={stock.ticker}
+            currentPrice={a?.price ?? null}
+          />
 
           {/* Footer: timestamp + enlace historial */}
           <div className="flex items-center justify-between">

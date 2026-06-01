@@ -60,6 +60,7 @@ model Stock {
   analysis          StockAnalysis?
   history           StockAnalysisHistory[]
   closedOperations  ClosedOperation[]
+  transactions      Transaction[]
 
   @@unique([ticker, userId])
 }
@@ -121,6 +122,25 @@ model StockAnalysisHistory {
   rsi14         Float?
 
   @@index([stockId, snapshotAt(sort: Desc)])
+}
+
+enum TransactionType {
+  BUY
+  SELL
+}
+
+model Transaction {
+  id        String          @id @default(uuid())
+  stockId   String
+  stock     Stock           @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  type      TransactionType
+  shares    Float
+  price     Float           // average price per share for this transaction
+  date      DateTime?       // optional acquisition / sale date
+  notes     String?         // optional free-text annotation
+  createdAt DateTime        @default(now())
+
+  @@index([stockId, createdAt(sort: Desc)])
 }
 
 // Shared persistent cache for cross-request data (macro context, earnings guidance).

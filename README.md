@@ -68,6 +68,8 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 - **Exportación CSV** — `GET /api/portfolio/export?format=csv` descarga un CSV con 34 campos por acción: precio, cambio %, escenario activo, confidenceScore, indicadores técnicos (RSI14, SMA20/50, ATR14, volumen relativo), escenarios por horizonte (corto/medio/largo plazo), divergencia precio/RSI, datos de posición (precio compra, cantidad, coste base, valor actual, P&L en USD y %), y timestamp de generación. Requiere sesión autenticada; solo exporta datos del usuario en sesión. Botón «↓ CSV» en el resumen de cartera
 - **Motor de ventas** — `POST /api/portfolio/sell` registra una venta parcial o total de una posición. Body: `{ stockId, shares, price }`. Verifica propiedad y disponibilidad de acciones, calcula con precisión de 2 decimales `investedAmount = shares × buyPrice`, `revenueAmount = shares × sellPrice`, `profitAmount = revenueAmount − investedAmount` y `profitPercentage = (profitAmount / investedAmount) × 100`. Persiste la operación en `ClosedOperation` y actualiza la posición (reduce `quantity` o elimina el registro si `quantity` llega a 0). Devuelve el registro de la operación cerrada y el estado actualizado. HTTP 400 si acciones insuficientes o precio de compra no registrado; 404 si la posición no existe
 - **Historial de operaciones cerradas** — `GET /api/portfolio/history` devuelve el listado completo de ventas ejecutadas (orden `closedAt DESC`) junto a los agregados globales de la cartera: capital total invertido en operaciones cerradas, retorno total recaudado, profit absoluto acumulado ($) y ROI global (%). El ROI se calcula como `(Σ revenueAmount − Σ investedAmount) / Σ investedAmount × 100` sobre todas las operaciones cerradas del usuario
+- **Sistema de transacciones (WAC)** — Motor completo de registro de compras y ventas por posición usando el método de Coste Medio Ponderado (Weighted Average Cost). Cada transacción almacena: tipo (BUY/SELL), acciones, precio medio, fecha (opcional) y notas (opcional). El servicio calcula en tiempo real: precio medio de compra WAC dinámico (se recalcula con cada BUY en orden cronológico), precio medio de venta, coste base abierto, valor actual, PnL no realizado ($ y %), PnL realizado ($ y %), precio de equilibrio (= avgBuyPrice), días en cartera (desde primera transacción con fecha), rentabilidad anualizada CAGR (`((totalFinal/totalInvertido)^(365/días))−1`) y peso en cartera (%). API: `POST /api/portfolio/transactions` (registrar BUY o SELL), `GET /api/portfolio/transactions?stockId=xxx&currentPrice=yyy` (métricas + historial), `DELETE /api/portfolio/transactions/[id]` (eliminar transacción). Panel «Transacciones» plegable en cada `StockCard` con formulario inline, métricas compactas y lista de operaciones con posibilidad de eliminar
+- **Vista global de rendimiento** — `/dashboard/portfolio` muestra todas las posiciones con transacciones, agregados globales (valor actual total, coste base total, PnL no realizado + %, PnL realizado, PnL total) y detalle por posición con todas las métricas; accesible desde «Rendimiento →» en el resumen de cartera
 
 ### Actualización de datos
 - **Actualización manual** — Botón en dashboard con caché de 4h; muestra resultado completo: actualizadas · en caché · con error (con tickers afectados)
@@ -122,7 +124,9 @@ src/
 │   │   │   ├── simulation/       # POST: Monte Carlo + stress tests
 │   │   │   ├── export/           # GET: exportación CSV de cartera (?format=csv)
 │   │   │   ├── sell/             # POST: registrar venta + cerrar/reducir posición
-│   │   │   └── history/          # GET: historial de operaciones cerradas + ROI agregado
+│   │   │   ├── history/          # GET: historial de operaciones cerradas + ROI agregado
+│   │   │   ├── transactions/     # GET+POST: métricas WAC + registrar BUY/SELL
+│   │   │   └── transactions/[id] # DELETE: eliminar transacción
 │   │   ├── market/top-gainers/   # GET: top movers Finnhub
 │   │   ├── macro/flash/          # GET: contexto macro (caché 4h)
 │   │   ├── search/               # GET: búsqueda de tickers
@@ -145,13 +149,15 @@ src/
 │   ├── earningsService.ts        # Guidance de earnings (caché 30d)
 │   ├── quantitativeService.ts    # Sharpe, Kelly, GARCH, correlaciones, Fear&Greed, PEG Lynch
 │   ├── portfolioService.ts       # executeSell (motor de ventas), getClosedPerformance (ROI)
+│   ├── transactionService.ts     # WAC engine: calculatePositionMetrics, addTransaction, getPortfolioMetrics
 │   └── portfolioAIService.ts     # Análisis global de cartera
 ├── repositories/                 # Acceso a Prisma/PostgreSQL
 │   ├── stockRepository.ts
 │   ├── analysisRepository.ts
 │   ├── analysisHistoryRepository.ts
 │   ├── portfolioAnalysisRepository.ts
-│   └── closedOperationRepository.ts  # CRUD de operaciones de venta cerradas
+│   ├── closedOperationRepository.ts  # CRUD de operaciones de venta cerradas
+│   └── transactionRepository.ts      # CRUD de transacciones BUY/SELL
 ├── lib/                          # Clientes externos y utilidades
 │   ├── geminiClient.ts           # Google Gemini (JSON mode, retries, STATIC_SYSTEM_INSTRUCTION)
 │   ├── withTimeout.ts            # Promise.race wrapper con clearTimeout en .finally()
@@ -274,6 +280,13 @@ ClosedOperation
   profitAmount (revenue−invested) · profitPercentage ((profit/invested)×100)
   closedAt (@default now)
   Index: (stockId, closedAt DESC)
+
+Transaction
+  id (UUID) · stockId → Stock (CASCADE)
+  type (BUY|SELL) · shares · price (avg per share)
+  date? (optional acquisition/sale date) · notes? (free text)
+  createdAt (@default now)
+  Index: (stockId, createdAt DESC)
 
 PortfolioAnalysis
   id · userId → User (unique)
