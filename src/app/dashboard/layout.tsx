@@ -6,6 +6,17 @@ import LogoutButton from "@/components/dashboard/LogoutButton";
 import RiskProfileBadge from "@/components/dashboard/RiskProfileBadge";
 import { prisma } from "@/lib/prisma";
 
+function NavLink({ href, children, className = "" }: { href: string; children: React.ReactNode; className?: string }) {
+  return (
+    <Link
+      href={href}
+      className={`text-sm text-slate-300 hover:text-white transition-colors px-1 ${className}`}
+    >
+      {children}
+    </Link>
+  );
+}
+
 export default async function DashboardLayout({
   children,
 }: {
@@ -20,24 +31,28 @@ export default async function DashboardLayout({
   });
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+    <div className="min-h-screen bg-[var(--background)] flex flex-col">
+      {/* ── Dark header — MyInvestor style ── */}
+      <header className="sticky top-0 z-10" style={{ background: "var(--header-bg)", borderBottom: "1px solid var(--header-border)" }}>
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-          <span className="font-bold text-gray-900">My Personal Advisor</span>
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-600 hidden sm:inline">
+          {/* Brand */}
+          <Link href="/dashboard" className="font-bold text-white tracking-tight hover:text-gray-200 transition-colors">
+            My Personal Advisor
+          </Link>
+
+          {/* Nav */}
+          <div className="flex items-center gap-1 sm:gap-3">
+            <span className="text-sm text-slate-400 hidden md:inline px-1">
               {session.user.name ?? session.user.email}
             </span>
+
             <RiskProfileBadge riskLabel={userProfile?.riskLabel ?? null} />
-            <Link href="/dashboard/simulation" className="text-sm text-gray-500 hover:text-gray-700 hidden sm:inline">
-              Simulación
-            </Link>
-            <Link href="/dashboard/help" className="text-sm text-gray-500 hover:text-gray-700">
-              ¿Cómo funciona?
-            </Link>
-            <Link href="/dashboard/settings" className="text-sm text-gray-500 hover:text-gray-700">
-              Ajustes
-            </Link>
+
+            <NavLink href="/dashboard/simulation">Simulación</NavLink>
+            <NavLink href="/dashboard/portfolio">Rendimiento</NavLink>
+            <NavLink href="/dashboard/help" className="hidden sm:inline">Ayuda</NavLink>
+            <NavLink href="/dashboard/settings">Ajustes</NavLink>
+
             <LogoutButton />
           </div>
         </div>
@@ -45,7 +60,7 @@ export default async function DashboardLayout({
 
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-8">{children}</main>
 
-      <footer className="py-4 text-center text-xs text-gray-400 border-t border-gray-100">
+      <footer className="py-4 text-center text-xs text-slate-400 border-t border-slate-200">
         Developed by Joan Antoni González
       </footer>
     </div>

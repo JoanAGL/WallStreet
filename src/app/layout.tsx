@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import SessionProvider from "@/components/providers/SessionProvider";
 import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
   title: "My Personal Advisor – Análisis Bursátil Informativo",
@@ -19,7 +22,7 @@ export default async function RootLayout({
 
   return (
     <html lang="es">
-      <body className="min-h-screen bg-background text-foreground antialiased">
+      <body className={`${inter.className} min-h-screen bg-[var(--background)] text-[var(--foreground)] antialiased`}>
         <SessionProvider session={session}>
           {children}
         </SessionProvider>
