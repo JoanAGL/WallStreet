@@ -43,9 +43,9 @@ vi.mock("@/services/newsAnalysisService", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/newsAnalysisService")>();
   return {
     ...actual,
-    fetchArticlesForTicker: vi.fn(),
+    fetchAllArticlesInParallel: vi.fn(), // batch entry-point used by full pipeline
     batchAnalyzeSentiment: vi.fn(),
-    analyzeNewsForTicker: vi.fn(), // keep for partial-update path
+    analyzeNewsForTicker: vi.fn(),       // kept for partial-update path
   };
 });
 
@@ -68,9 +68,7 @@ vi.mock("@/services/macroService", () => ({
 }));
 
 vi.mock("@/services/earningsService", () => ({
-  EarningsService: {
-    getGuidanceInsight: vi.fn(),
-  },
+  fetchAllEarningsGuidance: vi.fn(), // batch entry-point replacing EarningsService.getGuidanceInsight × N
 }));
 
 vi.mock("@/lib/cacheStore", () => ({
@@ -86,8 +84,8 @@ import { fetchNewsForTicker } from "@/lib/newsApiClient";
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import { upsertAnalysis, getAnalysisByStockId } from "@/repositories/analysisRepository";
 import { getGlobalContext } from "@/services/macroService";
-import { EarningsService } from "@/services/earningsService";
-import { fetchArticlesForTicker, batchAnalyzeSentiment } from "@/services/newsAnalysisService";
+import { fetchAllEarningsGuidance } from "@/services/earningsService";
+import { fetchAllArticlesInParallel, batchAnalyzeSentiment } from "@/services/newsAnalysisService";
 import { runAnalysisForStocks } from "@/services/analysisOrchestrator";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -136,16 +134,18 @@ function setupMocks() {
 
   vi.mocked(fetchNewsForTicker).mockResolvedValue(MOCK_NEWS_ARTICLES);
 
-  // fetchArticlesForTicker: NewsAPI-only phase (no Gemini)
-  vi.mocked(fetchArticlesForTicker).mockResolvedValue({
-    articles: MOCK_NEWS_ARTICLES.map((a) => ({
-      title: a.title,
-      description: a.description ?? "",
-      url: a.url,
-      publishedAt: a.publishedAt,
-      source: a.source.name,
-    })),
-  });
+  // fetchAllArticlesInParallel: returns one result per ticker (1 ticker in tests)
+  vi.mocked(fetchAllArticlesInParallel).mockResolvedValue([
+    {
+      articles: MOCK_NEWS_ARTICLES.map((a) => ({
+        title: a.title,
+        description: a.description ?? "",
+        url: a.url,
+        publishedAt: a.publishedAt,
+        source: a.source.name,
+      })),
+    },
+  ]);
 
   // batchAnalyzeSentiment: returns pre-computed sentiment map
   vi.mocked(batchAnalyzeSentiment).mockResolvedValue(
@@ -159,14 +159,17 @@ function setupMocks() {
     fetchedAt: new Date().toISOString(),
   });
 
-  vi.mocked(EarningsService.getGuidanceInsight).mockResolvedValue({
-    fiscalQuarter: "Q2 2025",
-    sentiment: "EXPANSIVO",
-    revenueGuidanceYoY: 6.1,
-    epsGuidanceStatus: "UPWARD",
-    keyCeoQuotes: ["We remain confident in our long-term trajectory."],
-    macroImpactJustification: "Rising rates create headwinds but product cycle offsets them.",
-  });
+  // fetchAllEarningsGuidance: returns one result per ticker (1 ticker in tests)
+  vi.mocked(fetchAllEarningsGuidance).mockResolvedValue([
+    {
+      fiscalQuarter: "Q2 2025",
+      sentiment: "EXPANSIVO",
+      revenueGuidanceYoY: 6.1,
+      epsGuidanceStatus: "UPWARD",
+      keyCeoQuotes: ["We remain confident in our long-term trajectory."],
+      macroImpactJustification: "Rising rates create headwinds but product cycle offsets them.",
+    },
+  ]);
 
   // Only 1 Gemini call now: batch all-horizons.
   // News sentiment is mocked via batchAnalyzeSentiment (bypasses Gemini in tests).

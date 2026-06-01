@@ -69,8 +69,7 @@ ${headlines}`;
 
 /**
  * Fetches and normalizes articles for one ticker WITHOUT calling Gemini.
- * Used by the batch orchestrator to collect articles before the single batch
- * sentiment call. Never throws — returns empty articles + dataIssue on error.
+ * Never throws — returns empty articles + dataIssue on error.
  */
 export async function fetchArticlesForTicker(
   ticker: string
@@ -92,6 +91,29 @@ export async function fetchArticlesForTicker(
       dataIssue: { kind: "API_ERROR", source: "news", message },
     };
   }
+}
+
+/**
+ * Fetches articles for all tickers in parallel using Promise.allSettled.
+ * Returns one result per ticker in the same order. Never throws — individual
+ * failures produce empty articles with a dataIssue entry.
+ */
+export async function fetchAllArticlesInParallel(
+  tickers: string[]
+): Promise<Array<{ articles: NewsArticle[]; dataIssue?: DataIssue }>> {
+  const results = await Promise.allSettled(tickers.map((t) => fetchArticlesForTicker(t)));
+  return results.map((r) =>
+    r.status === "fulfilled"
+      ? r.value
+      : {
+          articles: [],
+          dataIssue: {
+            kind: "API_ERROR" as const,
+            source: "news" as const,
+            message: r.reason instanceof Error ? r.reason.message : String(r.reason),
+          },
+        }
+  );
 }
 
 // ── Zod schema for batch sentiment response ───────────────────────────────────

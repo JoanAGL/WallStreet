@@ -102,6 +102,20 @@ function parseGuidance(raw: string, quarter: string): EarningsGuidanceInsight {
 
 // ── EarningsService ───────────────────────────────────────────────────────────
 
+/**
+ * Fetches earnings guidance for all tickers in parallel using Promise.allSettled.
+ * Returns one result per ticker in the same order. Failures resolve to null
+ * so a single slow or unavailable ticker does not block the rest.
+ */
+export async function fetchAllEarningsGuidance(
+  tickers: string[]
+): Promise<Array<EarningsGuidanceInsight | null>> {
+  const results = await Promise.allSettled(
+    tickers.map((t) => EarningsService.getGuidanceInsight(t))
+  );
+  return results.map((r) => (r.status === "fulfilled" ? r.value : null));
+}
+
 export class EarningsService {
   /**
    * Returns the earnings guidance insight for a given ticker.

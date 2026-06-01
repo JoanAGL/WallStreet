@@ -2,14 +2,14 @@ import { getCurrentQuote, getHistoricalCloses } from "./marketDataService";
 import type { CurrentQuote, HistoricalData } from "./marketDataService";
 import { withTimeout } from "@/lib/withTimeout";
 import { calculateIndicators } from "./technicalAnalysisService";
-import { analyzeNewsForTicker, fetchArticlesForTicker, batchAnalyzeSentiment } from "./newsAnalysisService";
-import type { DataIssue, NewsAnalysis } from "./newsAnalysisService";
+import { analyzeNewsForTicker, fetchAllArticlesInParallel, batchAnalyzeSentiment } from "./newsAnalysisService";
+import type { DataIssue, NewsAnalysis, Sentiment } from "./newsAnalysisService";
 import { batchGenerateAllHorizons, FALLBACK_HORIZON } from "./aiAnalysisService";
 import type { AllHorizonsAIAnalysis, HorizonAnalysis, BatchStockInput, DataQuality } from "./aiAnalysisService";
 import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore } from "./quantitativeService";
 import { getGlobalContext } from "./macroService";
 import type { MacroGlobalContext } from "./macroService";
-import { EarningsService } from "./earningsService";
+import { fetchAllEarningsGuidance } from "./earningsService";
 import { fetchAllFundamentals } from "@/lib/yahooFinanceClient";
 import type { AllFundamentals } from "@/lib/yahooFinanceClient";
 import {
@@ -32,12 +32,14 @@ const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 
 // ── Per-service timeout budgets (ms) ─────────────────────────────────────────
 const TIMEOUTS = {
-  quote:           3_000,   // Finnhub real-time quote
-  historical:      8_000,   // Yahoo Finance candlestick data
-  fundamentals:    6_000,   // Yahoo Finance quoteSummary
-  news:            5_000,   // NewsAPI article fetch
-  geminiPerStock: 25_000,   // Gemini per-stock (used to scale batch budget)
-  geminiPortfolio:30_000,   // Gemini portfolio analysis
+  quote:            3_000,   // Finnhub real-time quote
+  historical:       8_000,   // Yahoo Finance candlestick data
+  fundamentals:     6_000,   // Yahoo Finance quoteSummary
+  macro:           12_000,   // MacroService (NewsAPI + Gemini classify, 4h cache)
+  newsBatch:       10_000,   // NewsAPI articles — entire batch of tickers
+  earningsBatch:    8_000,   // EarningsService — entire batch of tickers (30d cache)
+  geminiPerStock:  25_000,   // Gemini per-stock (used to scale batch budget)
+  geminiPortfolio: 30_000,   // Gemini portfolio analysis
 } as const;
 
 // ── Typed fallbacks — allow partial-data analysis when an API source fails ───
@@ -307,14 +309,6 @@ async function runFullAnalysis(
 
   if (withMarket.length === 0) return finalResults;
 
-  // Phase 2c: Fetch macro context once (4h cache — no extra latency on cache hit)
-  let macroContext: MacroGlobalContext | null = null;
-  try {
-    macroContext = await getGlobalContext();
-  } catch (err) {
-    console.warn("[ORCHESTRATOR] MacroService failed, continuing without macro context:", err);
-  }
-
   // Phase 2b: Compute portfolio-wide quant metrics using historical data from all stale stocks
   const quantHistoricalData: Record<string, number[]> = {};
   const quantCurrentPrices:  Record<string, number>   = {};
@@ -336,58 +330,75 @@ async function runFullAnalysis(
     quantHistoricalData, quantCurrentPrices, quantQuantities
   );
 
-  // Phase 3: Fetch news articles (NewsAPI only, no Gemini) + earnings in parallel
-  const [articleResults, earningsResults] = await Promise.all([
-    Promise.allSettled(
-      withMarket.map(({ stock }) =>
-        withTimeout(fetchArticlesForTicker(stock.ticker), TIMEOUTS.news, `NewsAPI:${stock.ticker}`)
-      )
-    ),
-    Promise.allSettled(
-      withMarket.map(({ stock }) =>
-        EarningsService.getGuidanceInsight(stock.ticker).catch(() => null)
-      )
-    ),
+  // Phase 2c + 3a: Macro context and article fetches in parallel (independent of each other)
+  const tickers = withMarket.map(({ stock }) => stock.ticker);
+  const [macroResult, rawArticlesResult] = await Promise.allSettled([
+    withTimeout(getGlobalContext(),                  TIMEOUTS.macro,     "MacroService"),
+    withTimeout(fetchAllArticlesInParallel(tickers), TIMEOUTS.newsBatch, "NewsAPI-batch"),
   ]);
 
-  // Phase 4: Batch news sentiment — ONE Gemini call for all tickers with articles
-  const newsArticleInputs: Array<{ ticker: string; articles: import("./newsAnalysisService").NewsArticle[] }> = [];
+  let macroContext: MacroGlobalContext | null = null;
+  if (macroResult.status === "fulfilled") {
+    macroContext = macroResult.value;
+  } else {
+    console.warn("[ORCHESTRATOR] MacroService failed, continuing without macro context:", macroResult.reason);
+  }
+
+  const batchTimeoutMsg = rawArticlesResult.status === "rejected"
+    ? (rawArticlesResult.reason instanceof Error ? rawArticlesResult.reason.message : String(rawArticlesResult.reason))
+    : null;
+  if (batchTimeoutMsg) {
+    console.warn("[ORCHESTRATOR] NewsAPI batch failed, using empty articles:", batchTimeoutMsg);
+  }
+  const articlesData = rawArticlesResult.status === "fulfilled"
+    ? rawArticlesResult.value
+    : tickers.map((): { articles: never[]; dataIssue: DataIssue } => ({
+        articles: [],
+        dataIssue: { kind: "API_ERROR", source: "news", message: batchTimeoutMsg ?? "NewsAPI-batch timeout" },
+      }));
+
+  // Phase 3b: Batch sentiment (depends on articles) + earnings in parallel
+  // batchAnalyzeSentiment is not wrapped with withTimeout because it already
+  // has internal fallback handling; wrapping would cut off its fallback path.
+  const rawArticles = tickers
+    .map((ticker, i) => ({ ticker, articles: articlesData[i].articles }))
+    .filter((inp) => inp.articles.length > 0);
+
+  const [batchSentimentsResult, earningsResult] = await Promise.allSettled([
+    batchAnalyzeSentiment(rawArticles),
+    withTimeout(fetchAllEarningsGuidance(tickers), TIMEOUTS.earningsBatch, "EarningsService"),
+  ]);
+
+  const batchSentiments = batchSentimentsResult.status === "fulfilled"
+    ? batchSentimentsResult.value
+    : new Map<string, { summary: string; sentiment: Sentiment }>();
+  if (batchSentimentsResult.status === "rejected") {
+    console.warn("[ORCHESTRATOR] batchAnalyzeSentiment failed:", batchSentimentsResult.reason);
+  }
+
+  const earningsData = earningsResult.status === "fulfilled"
+    ? earningsResult.value
+    : tickers.map(() => null);
+  if (earningsResult.status === "rejected") {
+    console.warn("[ORCHESTRATOR] EarningsService batch failed:", earningsResult.reason);
+  }
+
+  // Phase 4: Build newsAnalysisMap from articles + batch sentiment results
   const newsAnalysisMap = new Map<string, NewsAnalysis>();
   const now = new Date().toISOString();
 
   withMarket.forEach(({ stock }, i) => {
-    const r = articleResults[i];
-    if (r.status === "fulfilled") {
-      const { articles, dataIssue } = r.value;
-      if (articles.length > 0) {
-        newsArticleInputs.push({ ticker: stock.ticker, articles });
-      }
-      // Placeholder — sentiment will be filled after batch call
-      newsAnalysisMap.set(stock.ticker, {
-        ticker: stock.ticker, articles,
-        summary: "Pendiente de análisis.", sentiment: "Neutral",
-        analyzedAt: now, dataIssue,
-      });
-    } else {
-      const message = r.reason instanceof Error ? r.reason.message : String(r.reason);
-      newsAnalysisMap.set(stock.ticker, {
-        ticker: stock.ticker, articles: [],
-        summary: "Error al obtener noticias.", sentiment: "Neutral",
-        analyzedAt: now,
-        dataIssue: { kind: "API_ERROR", source: "news", message },
-      });
-    }
-  });
-
-  if (newsArticleInputs.length > 0) {
-    const batchSentiments = await batchAnalyzeSentiment(newsArticleInputs);
-    batchSentiments.forEach((result, ticker) => {
-      const existing = newsAnalysisMap.get(ticker);
-      if (existing) {
-        newsAnalysisMap.set(ticker, { ...existing, summary: result.summary, sentiment: result.sentiment });
-      }
+    const { articles, dataIssue } = articlesData[i];
+    const sentimentEntry = batchSentiments.get(stock.ticker);
+    newsAnalysisMap.set(stock.ticker, {
+      ticker:     stock.ticker,
+      articles,
+      summary:    sentimentEntry?.summary   ?? (articles.length > 0 ? "Pendiente de análisis." : "Error al obtener noticias."),
+      sentiment:  sentimentEntry?.sentiment ?? "Neutral",
+      analyzedAt: now,
+      dataIssue,
     });
-  }
+  });
 
   // Phase 5: Build batch inputs and run batch all-horizons AI (ceil(N/4) Gemini calls)
   const batchInputs: BatchStockInput[] = withMarket.map(({ stock, quote, indicators, allFundamentals, dataQuality }, i) => {
@@ -397,11 +408,10 @@ async function runFullAnalysis(
     const fearGreedScore = indicators.rsi14 != null
       ? calculateFearGreedScore(indicators.rsi14, sentiment)
       : null;
-    const earningsResult = earningsResults[i];
-    const earningsGuidance = earningsResult.status === "fulfilled" ? earningsResult.value : null;
+    const earningsGuidance = earningsData[i] ?? null;
 
-    // Finalise dataQuality.news now that article results are available
-    const newsOk = articleResults[i].status === "fulfilled";
+    // Finalise dataQuality.news: true when articles were actually fetched for this ticker
+    const newsOk = rawArticlesResult.status === "fulfilled" && articlesData[i].articles.length > 0;
     const finalDataQuality: DataQuality = {
       ...dataQuality,
       news:     newsOk,
