@@ -44,7 +44,7 @@ export default function PortfolioAIInsights({ analysisJson, stockCount, updatedA
   const riskBadge      = RISK_BADGE[a.riskProfile]           ?? RISK_BADGE["Moderado"];
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-sm font-semibold text-gray-700">

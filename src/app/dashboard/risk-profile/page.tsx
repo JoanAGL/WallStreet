@@ -161,7 +161,7 @@ export default function RiskProfilePage() {
 
       <div className="space-y-5">
         {QUESTIONS.map((q, qi) => (
-          <div key={q.id} className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+          <div key={q.id} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
             <p className="text-sm font-medium text-gray-900">
               <span className="text-blue-500 mr-1">{qi + 1}.</span> {q.text}
             </p>

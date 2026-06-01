@@ -38,7 +38,7 @@ export default async function PortfolioBenchmark({ stocks }: Props) {
     const sinceStr = oldestDate.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
 
     return (
-      <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 space-y-1">
+      <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 space-y-1">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Tu cartera vs S&amp;P 500 (SPY) · desde {sinceStr}
         </p>

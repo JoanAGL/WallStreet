@@ -104,7 +104,7 @@ export default function AddStockForm({ currentCount, maxCount = 20 }: Props) {
           {showDropdown && ticker.length >= 2 && (
             <ul
               role="listbox"
-              className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden max-h-56 overflow-y-auto"
+              className="absolute z-20 left-0 right-0 mt-1 bg-slate-50 border border-slate-200 rounded-lg shadow-lg overflow-hidden max-h-56 overflow-y-auto"
             >
               {loadingSuggestions ? (
                 <li className="px-3 py-2 text-sm text-gray-400">Buscando...</li>

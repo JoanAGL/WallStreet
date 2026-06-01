@@ -29,7 +29,7 @@ function MetricBox({
   label, value, sub, valueClass = "text-gray-900",
 }: { label: string; value: string; sub?: string; valueClass?: string }) {
   return (
-    <div className="bg-gray-50 border border-gray-100 rounded-xl p-2.5 text-center">
+    <div className="bg-white border border-slate-100 rounded-xl p-2.5 text-center">
       <p className="text-xs text-gray-400 truncate">{label}</p>
       <p className={`text-sm font-bold mt-0.5 ${valueClass}`}>{value}</p>
       {sub && <p className="text-xs text-gray-400">{sub}</p>}
@@ -262,7 +262,7 @@ function TxRow({
     : new Date(tx.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
   return (
-    <div className="flex items-center gap-2 rounded-lg bg-gray-50 border border-gray-100 px-3 py-2 text-xs">
+    <div className="flex items-center gap-2 rounded-lg bg-white border border-slate-100 px-3 py-2 text-xs">
       <span className={`font-bold w-8 shrink-0 ${isBuy ? "text-green-600" : "text-red-600"}`}>
         {isBuy ? "BUY" : "SELL"}
       </span>

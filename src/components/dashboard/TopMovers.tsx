@@ -19,7 +19,7 @@ export default async function TopMovers() {
   if (gainers.length === 0) return null;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
+    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
         Top 5 mayores subidas hoy (S&amp;P 100)
       </p>

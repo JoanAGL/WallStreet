@@ -63,7 +63,7 @@ export default async function DashboardPage() {
         />
       )}
 
-      <div className="bg-white border border-gray-200 rounded-xl p-4">
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
         <p className="text-sm font-medium text-gray-700 mb-3">
           Añadir acción (NYSE / NASDAQ)
         </p>

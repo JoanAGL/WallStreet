@@ -8,7 +8,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           </h1>
           <p className="text-sm text-slate-500 mt-1">Análisis bursátil informativo</p>
         </div>
-        <div className="bg-white rounded-2xl shadow-md border border-slate-200 p-8">
+        <div className="bg-slate-50 rounded-2xl shadow-md border border-slate-200 p-8">
           {children}
         </div>
       </div>

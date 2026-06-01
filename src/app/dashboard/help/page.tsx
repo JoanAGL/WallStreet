@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-3">
+  <section className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3">
     <h2 className="font-semibold text-gray-900">{title}</h2>
     <div className="text-sm text-gray-600 space-y-2">{children}</div>
   </section>

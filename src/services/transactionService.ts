@@ -237,6 +237,104 @@ export async function getStockMetrics(
   return calculatePositionMetrics(txs, stockId, stock.ticker, currentPrice);
 }
 
+// ── Sell history (per-sell WAC P&L) ──────────────────────────────────────────
+
+export interface SellHistoryEntry {
+  id:               string;   // transaction id — used for delete
+  ticker:           string;
+  stockId:          string;
+  shares:           number;
+  avgCostAtSale:    number;
+  sellPrice:        number;
+  investedAmount:   number;
+  revenueAmount:    number;
+  profitAmount:     number;
+  profitPercentage: number;
+  date:             Date;
+  notes:            string | null;
+}
+
+export interface SellHistorySummary {
+  entries:          SellHistoryEntry[];
+  totalInvested:    number;
+  totalRevenue:     number;
+  totalProfit:      number;
+  totalProfitPct:   number;
+}
+
+export async function getTransactionHistory(userId: string): Promise<SellHistorySummary> {
+  const { prisma } = await import("@/lib/prisma");
+
+  const stocks = await prisma.stock.findMany({
+    where:  { userId },
+    select: { id: true, ticker: true },
+  });
+  const tickerMap = new Map(stocks.map((s) => [s.id, s.ticker]));
+
+  const txs = await getTransactionsByUser(userId);
+  const byStock = new Map<string, TransactionRecord[]>();
+  for (const tx of txs) {
+    if (!byStock.has(tx.stockId)) byStock.set(tx.stockId, []);
+    byStock.get(tx.stockId)!.push(tx);
+  }
+
+  const entries: SellHistoryEntry[] = [];
+
+  for (const [stockId, stockTxs] of Array.from(byStock.entries())) {
+    const ticker = tickerMap.get(stockId) ?? stockId;
+    const sorted = [...stockTxs].sort((a, b) => {
+      const da = (a.date ?? a.createdAt).getTime();
+      const db = (b.date ?? b.createdAt).getTime();
+      return da - db || a.createdAt.getTime() - b.createdAt.getTime();
+    });
+
+    let avgCost    = 0;
+    let openShares = 0;
+
+    for (const tx of sorted) {
+      if (tx.type === "BUY") {
+        const totalCost = avgCost * openShares + tx.price * tx.shares;
+        openShares      = r2(openShares + tx.shares);
+        avgCost         = openShares > 0 ? totalCost / openShares : 0;
+      } else {
+        const sellable        = Math.min(tx.shares, openShares);
+        const investedAmount  = r2(sellable * avgCost);
+        const revenueAmount   = r2(sellable * tx.price);
+        const profitAmount    = r2(revenueAmount - investedAmount);
+        const profitPct       = investedAmount > 0 ? r2((profitAmount / investedAmount) * 100) : 0;
+
+        openShares = r2(Math.max(0, openShares - sellable));
+
+        entries.push({
+          id:               tx.id,
+          ticker,
+          stockId,
+          shares:           sellable,
+          avgCostAtSale:    r2(avgCost),
+          sellPrice:        tx.price,
+          investedAmount,
+          revenueAmount,
+          profitAmount,
+          profitPercentage: profitPct,
+          date:             tx.date ?? tx.createdAt,
+          notes:            tx.notes ?? null,
+        });
+      }
+    }
+  }
+
+  entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const totalInvested = r2(entries.reduce((s, e) => s + e.investedAmount, 0));
+  const totalRevenue  = r2(entries.reduce((s, e) => s + e.revenueAmount,  0));
+  const totalProfit   = r2(totalRevenue - totalInvested);
+  const totalProfitPct = totalInvested > 0 ? r2((totalProfit / totalInvested) * 100) : 0;
+
+  return { entries, totalInvested, totalRevenue, totalProfit, totalProfitPct };
+}
+
+// ── Portfolio metrics ─────────────────────────────────────────────────────────
+
 export async function getPortfolioMetrics(
   userId:        string,
   currentPrices: Record<string, number>   // stockId → currentPrice

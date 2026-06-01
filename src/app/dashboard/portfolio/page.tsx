@@ -74,7 +74,7 @@ export default async function PortfolioPage() {
             {summary.positions
               .sort((a, b) => (b.currentValue ?? 0) - (a.currentValue ?? 0))
               .map((pos) => (
-                <div key={pos.stockId} className="bg-white border border-gray-200 rounded-2xl p-5 space-y-4">
+                <div key={pos.stockId} className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
 
                   {/* Position header */}
                   <div className="flex items-center justify-between">
@@ -173,7 +173,7 @@ function StatCard({ label, value, sub, valueClass = "text-gray-900" }: {
   label: string; value: string; sub?: string; valueClass?: string;
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-3 text-center">
+    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-sm ${valueClass}`}>{value}</p>
       {sub && <p className="text-xs text-gray-400">{sub}</p>}

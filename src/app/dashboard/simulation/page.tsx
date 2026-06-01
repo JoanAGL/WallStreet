@@ -147,7 +147,7 @@ function MonteCarloSection() {
       </div>
 
       {/* Controls */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Horizonte temporal</label>
           <select
@@ -197,7 +197,7 @@ function MonteCarloSection() {
       {result && (
         <div className="space-y-4">
           {/* Chart */}
-          <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
             <FanChart result={result} />
           </div>
 
@@ -208,7 +208,7 @@ function MonteCarloSection() {
               { label: "Probable (P50)", value: result.p50[result.days], color: "text-blue-600" },
               { label: "Optimista (P90)", value: result.p90[result.days], color: "text-green-600" },
             ].map((s) => (
-              <div key={s.label} className="bg-white border border-gray-200 rounded-xl p-3 text-center">
+              <div key={s.label} className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
                 <p className="text-xs text-gray-500">{s.label}</p>
                 <p className={`text-base font-bold mt-1 ${s.color}`}>{fmtMoney(s.value)}</p>
               </div>
@@ -217,7 +217,7 @@ function MonteCarloSection() {
 
           {/* Risk metrics */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-white border border-gray-200 rounded-xl p-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
               <p className="text-xs text-gray-500">VaR 95% (pérdida máx. probable)</p>
               <p className="text-base font-bold text-red-600 mt-1">
                 {result.var95 >= 0 ? "-" : "+"}{Math.abs(result.var95).toLocaleString("es-ES", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
@@ -227,7 +227,7 @@ function MonteCarloSection() {
                 Más conservador que el modelo normal estándar.
               </p>
             </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
               <p className="text-xs text-gray-500">CVaR 95% (pérdida esperada en peor 5%)</p>
               <p className="text-base font-bold text-red-700 mt-1">
                 {result.cvar95 >= 0 ? "-" : "+"}{Math.abs(result.cvar95).toLocaleString("es-ES", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
@@ -311,7 +311,7 @@ function OptimizationSection() {
       {result && (
         <div className="space-y-4">
           {/* Weights comparison table */}
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -351,7 +351,7 @@ function OptimizationSection() {
               { label: "Volatilidad", current: fmt(result.currentVol), optimal: fmt(result.optimalVol) },
               { label: "Ratio Sharpe", current: result.currentSharpe.toFixed(2), optimal: result.optimalSharpe.toFixed(2) },
             ].map((m) => (
-              <div key={m.label} className="bg-white border border-gray-200 rounded-xl p-3">
+              <div key={m.label} className="bg-slate-50 border border-slate-200 rounded-xl p-3">
                 <p className="text-xs text-gray-500 mb-2">{m.label}</p>
                 <div className="flex items-end gap-2">
                   <div>

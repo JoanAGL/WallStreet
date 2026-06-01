@@ -92,7 +92,7 @@ export default function StockUpdateMenu({ ticker }: Props) {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-7 z-20 w-56 bg-white border border-gray-200 rounded-xl shadow-lg p-3 space-y-2">
+        <div className="absolute right-0 top-7 z-20 w-56 bg-slate-50 border border-slate-200 rounded-xl shadow-lg p-3 space-y-2">
           <p className="text-xs font-semibold text-gray-700 pb-1 border-b border-gray-100">
             Actualizar {ticker}
           </p>

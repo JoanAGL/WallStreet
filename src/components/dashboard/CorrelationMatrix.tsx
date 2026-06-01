@@ -28,7 +28,7 @@ export default function CorrelationMatrix() {
 
   if (loading) {
     return (
-      <div className="bg-white border border-gray-200 rounded-xl p-4">
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Matriz de correlación</p>
         <div className="h-24 animate-pulse bg-gray-50 rounded-lg" />
       </div>
@@ -38,7 +38,7 @@ export default function CorrelationMatrix() {
   if (error || !data || data.tickers.length < 2) return null;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Matriz de correlación

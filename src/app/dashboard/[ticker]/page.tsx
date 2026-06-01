@@ -56,7 +56,7 @@ export default async function TickerHistoryPage({ params }: Props) {
         <>
           {/* Price chart — chronological order (oldest → newest) */}
           {history.length >= 2 && (
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
                 Precio — últimas {history.length} sesiones
               </p>
@@ -69,7 +69,7 @@ export default async function TickerHistoryPage({ params }: Props) {
             </div>
           )}
 
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">

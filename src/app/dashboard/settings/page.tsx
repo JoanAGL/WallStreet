@@ -6,7 +6,7 @@ import Link from "next/link";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="bg-white border border-gray-200 rounded-xl p-5 space-y-4">
+    <section className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4">
       <h2 className="font-semibold text-gray-900">{title}</h2>
       {children}
     </section>
