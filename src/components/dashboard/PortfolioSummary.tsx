@@ -49,7 +49,6 @@ export default function PortfolioSummary({ stocks }: Props) {
   const totalValue   = withPosition.reduce((sum, s) => sum + (s.analysis?.price ?? 0) * s.quantity!, 0);
   const totalPnl     = withPosition.length > 0 ? totalValue - totalCost : null;
   const totalPnlPct  = totalPnl != null && totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
-  const pnlColor     = totalPnl != null && totalPnl >= 0 ? "text-green-600" : "text-red-600";
 
   const leanPos = positivo > negativo;
   const leanNeg = negativo > positivo;
