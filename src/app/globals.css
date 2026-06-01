@@ -92,3 +92,45 @@ input::placeholder, textarea::placeholder { color: #4A5568; }
 /* ── Hover states ── */
 .hover\:bg-gray-50:hover  { background-color: var(--card-inner) !important; }
 .hover\:bg-gray-100:hover { background-color: #2A3550 !important; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Semantic alert colors — semi-transparent dark-friendly overlays
+   replaces the opaque light pastels (bg-*-50/100/200) that look washed out
+   on the dark background
+───────────────────────────────────────────────────────────────────────────── */
+
+/* Backgrounds */
+.bg-green-50   { background-color: rgba(22,  163, 74,  0.12); }
+.bg-green-100  { background-color: rgba(22,  163, 74,  0.18); }
+.bg-red-50     { background-color: rgba(239, 68,  68,  0.12); }
+.bg-red-100    { background-color: rgba(239, 68,  68,  0.18); }
+.bg-red-200    { background-color: rgba(239, 68,  68,  0.28); }
+.bg-yellow-50  { background-color: rgba(234, 179, 8,   0.12); }
+.bg-yellow-100 { background-color: rgba(234, 179, 8,   0.18); }
+.bg-amber-50   { background-color: rgba(245, 158, 11,  0.12); }
+.bg-amber-100  { background-color: rgba(245, 158, 11,  0.18); }
+.bg-blue-50    { background-color: rgba(59,  130, 246, 0.12); }
+.bg-blue-100   { background-color: rgba(59,  130, 246, 0.18); }
+.bg-orange-50  { background-color: rgba(249, 115, 22,  0.12); }
+.bg-sky-50     { background-color: rgba(14,  165, 233, 0.12); }
+.bg-gray-200   { background-color: #3D4E6A; }  /* correlation diagonal */
+
+/* Borders */
+.border-green-200  { border-color: rgba(22,  163, 74,  0.40); }
+.border-red-200    { border-color: rgba(239, 68,  68,  0.40); }
+.border-yellow-200 { border-color: rgba(234, 179, 8,   0.40); }
+.border-amber-200,
+.border-amber-300  { border-color: rgba(245, 158, 11,  0.40); }
+.border-blue-100,
+.border-blue-200   { border-color: rgba(59,  130, 246, 0.30); }
+.border-orange-200 { border-color: rgba(249, 115, 22,  0.40); }
+.border-sky-200    { border-color: rgba(14,  165, 233, 0.30); }
+
+/* Text — remap dark semantic tones to their light counterparts */
+.text-green-700, .text-green-800, .text-green-900 { color: #4ADE80; }
+.text-red-700,   .text-red-800,   .text-red-900   { color: #F87171; }
+.text-yellow-700, .text-yellow-800, .text-yellow-900 { color: #FDE047; }
+.text-amber-700,  .text-amber-800                    { color: #FCD34D; }
+.text-blue-700,   .text-blue-800                     { color: #93C5FD; }
+.text-orange-700, .text-orange-800                   { color: #FDBA74; }
+.text-sky-700,    .text-sky-800                      { color: #7DD3FC; }
