@@ -57,10 +57,28 @@ model Stock {
   user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt         DateTime          @default(now())
 
-  analysis  StockAnalysis?
-  history   StockAnalysisHistory[]
+  analysis          StockAnalysis?
+  history           StockAnalysisHistory[]
+  closedOperations  ClosedOperation[]
 
   @@unique([ticker, userId])
+}
+
+model ClosedOperation {
+  id               String   @id @default(uuid())
+  stockId          String
+  stock            Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  ticker           String
+  shares           Float
+  buyPrice         Float
+  sellPrice        Float
+  investedAmount   Float    // shares * buyPrice
+  revenueAmount    Float    // shares * sellPrice
+  profitAmount     Float    // revenueAmount - investedAmount
+  profitPercentage Float    // (profitAmount / investedAmount) * 100
+  closedAt         DateTime @default(now())
+
+  @@index([stockId, closedAt(sort: Desc)])
 }
 
 model StockAnalysis {

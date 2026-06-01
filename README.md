@@ -66,6 +66,8 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 - **Análisis global de cartera** — Resumen IA de diversificación, riesgo agregado y recomendaciones de rebalanceo (mínimo 2 acciones con análisis)
 - **Benchmark de cartera** — Comparación de rendimiento vs índice de referencia
 - **Exportación CSV** — `GET /api/portfolio/export?format=csv` descarga un CSV con 34 campos por acción: precio, cambio %, escenario activo, confidenceScore, indicadores técnicos (RSI14, SMA20/50, ATR14, volumen relativo), escenarios por horizonte (corto/medio/largo plazo), divergencia precio/RSI, datos de posición (precio compra, cantidad, coste base, valor actual, P&L en USD y %), y timestamp de generación. Requiere sesión autenticada; solo exporta datos del usuario en sesión. Botón «↓ CSV» en el resumen de cartera
+- **Motor de ventas** — `POST /api/portfolio/sell` registra una venta parcial o total de una posición. Body: `{ stockId, shares, price }`. Verifica propiedad y disponibilidad de acciones, calcula con precisión de 2 decimales `investedAmount = shares × buyPrice`, `revenueAmount = shares × sellPrice`, `profitAmount = revenueAmount − investedAmount` y `profitPercentage = (profitAmount / investedAmount) × 100`. Persiste la operación en `ClosedOperation` y actualiza la posición (reduce `quantity` o elimina el registro si `quantity` llega a 0). Devuelve el registro de la operación cerrada y el estado actualizado. HTTP 400 si acciones insuficientes o precio de compra no registrado; 404 si la posición no existe
+- **Historial de operaciones cerradas** — `GET /api/portfolio/history` devuelve el listado completo de ventas ejecutadas (orden `closedAt DESC`) junto a los agregados globales de la cartera: capital total invertido en operaciones cerradas, retorno total recaudado, profit absoluto acumulado ($) y ROI global (%). El ROI se calcula como `(Σ revenueAmount − Σ investedAmount) / Σ investedAmount × 100` sobre todas las operaciones cerradas del usuario
 
 ### Actualización de datos
 - **Actualización manual** — Botón en dashboard con caché de 4h; muestra resultado completo: actualizadas · en caché · con error (con tickers afectados)
@@ -118,7 +120,9 @@ src/
 │   │   │   ├── optimize/         # GET: Black-Litterman
 │   │   │   ├── rebalance/        # POST: rebalanceo + tax harvesting
 │   │   │   ├── simulation/       # POST: Monte Carlo + stress tests
-│   │   │   └── export/           # GET: exportación CSV de cartera (?format=csv)
+│   │   │   ├── export/           # GET: exportación CSV de cartera (?format=csv)
+│   │   │   ├── sell/             # POST: registrar venta + cerrar/reducir posición
+│   │   │   └── history/          # GET: historial de operaciones cerradas + ROI agregado
 │   │   ├── market/top-gainers/   # GET: top movers Finnhub
 │   │   ├── macro/flash/          # GET: contexto macro (caché 4h)
 │   │   ├── search/               # GET: búsqueda de tickers
@@ -140,12 +144,14 @@ src/
 │   ├── macroService.ts           # Contexto macro global (caché Supabase)
 │   ├── earningsService.ts        # Guidance de earnings (caché 30d)
 │   ├── quantitativeService.ts    # Sharpe, Kelly, GARCH, correlaciones, Fear&Greed, PEG Lynch
+│   ├── portfolioService.ts       # executeSell (motor de ventas), getClosedPerformance (ROI)
 │   └── portfolioAIService.ts     # Análisis global de cartera
 ├── repositories/                 # Acceso a Prisma/PostgreSQL
 │   ├── stockRepository.ts
 │   ├── analysisRepository.ts
 │   ├── analysisHistoryRepository.ts
-│   └── portfolioAnalysisRepository.ts
+│   ├── portfolioAnalysisRepository.ts
+│   └── closedOperationRepository.ts  # CRUD de operaciones de venta cerradas
 ├── lib/                          # Clientes externos y utilidades
 │   ├── geminiClient.ts           # Google Gemini (JSON mode, retries, STATIC_SYSTEM_INSTRUCTION)
 │   ├── withTimeout.ts            # Promise.race wrapper con clearTimeout en .finally()
@@ -260,6 +266,14 @@ StockAnalysisHistory
   id · stockId → Stock
   snapshotAt · price · changePercent · scenarioLabel · horizonUsed · rsi14?
   Index: (stockId, snapshotAt DESC)
+
+ClosedOperation
+  id (UUID) · stockId → Stock (CASCADE) · ticker
+  shares · buyPrice · sellPrice
+  investedAmount (shares×buyPrice) · revenueAmount (shares×sellPrice)
+  profitAmount (revenue−invested) · profitPercentage ((profit/invested)×100)
+  closedAt (@default now)
+  Index: (stockId, closedAt DESC)
 
 PortfolioAnalysis
   id · userId → User (unique)

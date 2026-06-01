@@ -56,6 +56,29 @@ export async function findStockByTickerAndUser(
   }) as unknown as PrismaStock | null;
 }
 
+export async function findStockByIdAndUser(
+  id: string,
+  userId: string
+): Promise<PrismaStock | null> {
+  return prisma.stock.findFirst({
+    where: { id, userId },
+  }) as unknown as PrismaStock | null;
+}
+
+export async function updateStockQuantity(
+  id: string,
+  quantity: number
+): Promise<PrismaStock> {
+  return prisma.stock.update({
+    where: { id },
+    data:  { quantity },
+  }) as unknown as PrismaStock;
+}
+
+export async function removeStockById(id: string): Promise<void> {
+  await prisma.stock.delete({ where: { id } });
+}
+
 export async function addStock(ticker: string, userId: string): Promise<PrismaStock> {
   return prisma.stock.create({ data: { ticker, userId } }) as unknown as PrismaStock;
 }
