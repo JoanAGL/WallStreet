@@ -1,3 +1,4 @@
+import { unstable_cache, revalidateTag } from "next/cache";
 import { geminiChat } from "@/lib/geminiClient";
 import { cacheGet, cacheSet } from "@/lib/cacheStore";
 import type { EarningsGuidanceInsight, GuidanceSentiment, EpsGuidanceStatus } from "@/types/financial";
@@ -116,10 +117,26 @@ export async function fetchAllEarningsGuidance(
   return results.map((r) => (r.status === "fulfilled" ? r.value : null));
 }
 
+/**
+ * L1 — Next.js unstable_cache (in-memory, per-instance): ~ms, TTL 30d.
+ *   Cache key includes ticker + quarter so each pair has its own entry.
+ *   No-op in development (Next.js disables unstable_cache on every request),
+ *   so hot reloads always see fresh data locally.
+ * L2 — CacheEntry in Supabase (persistent, cross-instance): ~50ms, TTL 30d.
+ *   Source of truth shared between all Vercel instances.
+ * L3 — Gemini API: called at most once per ticker per fiscal quarter.
+ */
+const _readEarningsFromDb = unstable_cache(
+  async (ticker: string, quarter: string): Promise<EarningsGuidanceInsight | null> =>
+    cacheGet<EarningsGuidanceInsight>(`earnings::${ticker}::${quarter}`),
+  ["earnings-guidance"],
+  { revalidate: CACHE_TTL_SECONDS, tags: ["earnings"] }
+);
+
 export class EarningsService {
   /**
    * Returns the earnings guidance insight for a given ticker.
-   * Cached 30 days in Supabase (CacheEntry) — Gemini is only called once per ticker/quarter.
+   * Two-level cache: unstable_cache (L1, memory) → CacheEntry Supabase (L2) → Gemini (L3).
    * Falls back to structured mock data when GEMINI_API_KEY is not configured (dev environments).
    */
   static async getGuidanceInsight(ticker: string): Promise<EarningsGuidanceInsight> {
@@ -130,11 +147,14 @@ export class EarningsService {
       return buildFallback(quarter);
     }
 
-    const cacheKey = `earnings::${normalized}::${quarter}`;
-    const cached = await cacheGet<EarningsGuidanceInsight>(cacheKey);
+    // L1 + L2 read
+    const cached = await _readEarningsFromDb(normalized, quarter);
     if (cached) return cached;
 
+    // L3: full miss — call Gemini, persist to L2, then invalidate L1 so the
+    // next read re-hydrates from the freshly written Supabase row.
     const prompt = buildPrompt(normalized, quarter);
+    const cacheKey = `earnings::${normalized}::${quarter}`;
 
     try {
       const raw = await geminiChat(prompt, 600, 2, {
@@ -145,6 +165,7 @@ export class EarningsService {
 
       const data = parseGuidance(raw, quarter);
       await cacheSet(cacheKey, data, CACHE_TTL_SECONDS);
+      revalidateTag("earnings");
       return data;
     } catch (err) {
       console.error(`[EarningsService] Gemini inference failed for ${normalized}:`, err);

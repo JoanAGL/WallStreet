@@ -1,3 +1,4 @@
+import { unstable_cache, revalidateTag } from "next/cache";
 import { geminiChat } from "@/lib/geminiClient";
 import { cacheGet, cacheSet } from "@/lib/cacheStore";
 
@@ -152,11 +153,30 @@ async function fetchAndClassify(): Promise<MacroGlobalContext> {
   return { items, fetchedAt: new Date().toISOString() };
 }
 
+/**
+ * L1 — Next.js unstable_cache (in-memory, per-instance): ~ms, TTL 4h.
+ *   Skips the Supabase roundtrip on repeated reads within the same instance.
+ *   No-op in development (Next.js disables unstable_cache on every request),
+ *   so hot reloads always see fresh data locally.
+ * L2 — CacheEntry in Supabase (persistent, cross-instance): ~50ms, TTL 4h.
+ *   Source of truth shared between all Vercel instances.
+ * L3 — Gemini API: called only on a full cache miss in both layers.
+ */
+const _readMacroFromDb = unstable_cache(
+  async (): Promise<MacroGlobalContext | null> => cacheGet<MacroGlobalContext>(CACHE_KEY),
+  ["macro-global-context"],
+  { revalidate: CACHE_TTL_SECONDS, tags: ["macro"] }
+);
+
 export async function getGlobalContext(): Promise<MacroGlobalContext> {
-  const cached = await cacheGet<MacroGlobalContext>(CACHE_KEY);
+  // L1 + L2 read
+  const cached = await _readMacroFromDb();
   if (cached) return cached;
 
+  // L3: full miss — call Gemini, persist to L2, then invalidate L1 so the
+  // next read re-hydrates from the freshly written Supabase row.
   const data = await fetchAndClassify();
   await cacheSet(CACHE_KEY, data, CACHE_TTL_SECONDS);
+  revalidateTag("macro");
   return data;
 }
