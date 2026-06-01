@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import type { CorrelationResult } from "@/lib/portfolioMath";
 
 function cellColor(v: number): string {
-  if (v >= 1) return "bg-gray-100 text-gray-500";
-  if (v > 0.75) return "bg-red-100 text-red-800 font-semibold";
-  if (v > 0.4)  return "bg-yellow-50 text-yellow-800";
-  return "bg-green-50 text-green-800";
+  if (v >= 1) return "bg-gray-200 text-gray-600";
+  if (v > 0.75) return "bg-red-200 text-red-900 font-semibold";
+  if (v > 0.4)  return "bg-yellow-100 text-yellow-900";
+  return "bg-green-100 text-green-900";
 }
 
 export default function CorrelationMatrix() {
@@ -44,9 +44,9 @@ export default function CorrelationMatrix() {
           Matriz de correlación
         </p>
         <div className="flex items-center gap-3 text-xs text-gray-400">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-200 inline-block" /> Baja (&lt;0.4)</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-100 inline-block" /> Baja (&lt;0.4)</span>
           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-yellow-100 inline-block" /> Media</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-100 inline-block" /> Alta (&gt;0.75)</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-200 inline-block" /> Alta (&gt;0.75)</span>
         </div>
       </div>
 

@@ -19,7 +19,7 @@ export default function HelpPage() {
       </div>
 
       <Section title="Añadir acciones">
-        <p>Puedes añadir hasta <strong>5 acciones</strong> de los mercados NYSE y NASDAQ. Escribe el ticker (símbolo bursátil) en el campo de búsqueda: aparecerán sugerencias automáticas.</p>
+        <p>Puedes añadir hasta <strong>10 acciones</strong> de los mercados NYSE y NASDAQ. Escribe el ticker (símbolo bursátil) en el campo de búsqueda: aparecerán sugerencias automáticas.</p>
         <p>El sistema verifica que el ticker exista antes de añadirlo. Ejemplos válidos: <code className="bg-gray-100 px-1 rounded">AAPL</code>, <code className="bg-gray-100 px-1 rounded">MSFT</code>, <code className="bg-gray-100 px-1 rounded">BRK.B</code>.</p>
       </Section>
 

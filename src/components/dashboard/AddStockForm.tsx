@@ -20,7 +20,7 @@ function useDebounce<T>(value: T, delay: number): T {
   return debounced;
 }
 
-export default function AddStockForm({ currentCount, maxCount = 5 }: Props) {
+export default function AddStockForm({ currentCount, maxCount = 10 }: Props) {
   const router = useRouter();
   const [ticker, setTicker] = useState("");
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
