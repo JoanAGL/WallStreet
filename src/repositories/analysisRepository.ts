@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { StockAnalysisModel } from "@/types/models";
 import type { PriceRsiDivergence } from "@/services/technicalAnalysisService";
@@ -23,11 +24,24 @@ export interface UpsertAnalysisData {
 
 export type PartialAnalysisData = Partial<Omit<UpsertAnalysisData, "stockId">>;
 
+// Prisma's Json? column requires:
+//   null  → Prisma.JsonNull (sentinel — NOT plain null)
+//   value → cast to Prisma.InputJsonValue (our typed struct is JSON-serializable)
+function encodeDivergence(
+  v: PriceRsiDivergence | null | undefined
+): Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue | undefined {
+  if (v === undefined) return undefined;
+  if (v === null)      return Prisma.JsonNull;
+  return v as unknown as Prisma.InputJsonValue;
+}
+
 export async function upsertAnalysis(data: UpsertAnalysisData): Promise<StockAnalysisModel> {
+  const { divergenceAlert, ...rest } = data;
+  const payload = { ...rest, divergenceAlert: encodeDivergence(divergenceAlert) };
   return prisma.stockAnalysis.upsert({
     where:  { stockId: data.stockId },
-    update: { ...data, generatedAt: new Date() },
-    create: { ...data, generatedAt: new Date() },
+    update: { ...payload, generatedAt: new Date() },
+    create: { ...payload, generatedAt: new Date() },
   }) as unknown as StockAnalysisModel;
 }
 
@@ -37,9 +51,13 @@ export async function patchAnalysisFields(
 ): Promise<StockAnalysisModel | null> {
   const existing = await prisma.stockAnalysis.findUnique({ where: { stockId } });
   if (!existing) return null;
+  const { divergenceAlert, ...rest } = data;
+  const patch = "divergenceAlert" in data
+    ? { ...rest, divergenceAlert: encodeDivergence(divergenceAlert) }
+    : rest;
   return prisma.stockAnalysis.update({
     where: { stockId },
-    data,
+    data:  patch,
   }) as unknown as StockAnalysisModel;
 }
 

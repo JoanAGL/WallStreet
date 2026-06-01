@@ -5,7 +5,8 @@
 
 export type InvestmentHorizon = "SHORT_TERM" | "MEDIUM_TERM" | "LONG_TERM";
 
-export type { PriceRsiDivergence } from "@/services/technicalAnalysisService";
+import type { PriceRsiDivergence } from "@/services/technicalAnalysisService";
+export type { PriceRsiDivergence };
 
 // ── Señales algorítmicas (proyecciones cuantitativas, no asesoramiento financiero) ──
 
