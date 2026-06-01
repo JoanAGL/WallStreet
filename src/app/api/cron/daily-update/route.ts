@@ -1,19 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runAnalysisForStocks } from "@/services/analysisOrchestrator";
-
-// Vercel envía el CRON_SECRET como Bearer token en cada invocación
-function isAuthorized(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  const auth = req.headers.get("authorization");
-  return auth === `Bearer ${secret}`;
-}
+import { isCronAuthorized, unauthorizedResponse } from "@/lib/cronAuth";
 
 export async function GET(req: NextRequest) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  }
+  if (!isCronAuthorized(req)) return unauthorizedResponse();
 
   try {
     // Obtiene todas las acciones activas de todos los usuarios
