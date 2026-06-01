@@ -3,13 +3,19 @@
 @tailwind utilities;
 
 :root {
-  /* App shell */
-  --background: #EEF0F4;   /* cool gray — DeGiro/MyInvestor content area */
-  --foreground: #0F172A;   /* slate-900 */
+  /* App shell — dark fintech palette */
+  --background:    #161C2C;   /* slightly darker than header so header reads as a distinct layer */
+  --foreground:    #E2E8F0;   /* slate-200 — main text on dark bg */
 
   /* Header */
-  --header-bg:  #1B2130;   /* dark charcoal-navy — MyInvestor style */
+  --header-bg:     #1B2130;
   --header-border: #2D3748;
+
+  /* Cards */
+  --card-bg:       #1E2838;   /* slightly lighter than background */
+  --card-inner:    #252F44;   /* nested panels (MetricBox, TxRow) */
+  --card-border:   #2D3748;
+  --card-border-inner: #243044;
 }
 
 body {
@@ -17,8 +23,72 @@ body {
   background: var(--background);
 }
 
-/* Smooth scrollbar */
-* { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }
+/* Scrollbar */
+* { scrollbar-width: thin; scrollbar-color: #4A5568 transparent; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: #4A5568; border-radius: 3px; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Dark-theme overrides — placed AFTER @tailwind utilities so they win
+   specificity without !important. Remaps the light-palette Tailwind classes
+   used throughout the UI to their dark-palette equivalents.
+───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Backgrounds ── */
+.bg-white,
+.bg-slate-50  { background-color: var(--card-bg); }
+
+.bg-gray-50,
+.bg-slate-100 { background-color: var(--card-inner); }
+
+.bg-gray-100  { background-color: #2A3550; }
+
+/* ── Borders ── */
+.border-slate-200,
+.border-gray-200  { border-color: var(--card-border); }
+
+.border-slate-100,
+.border-gray-100  { border-color: var(--card-border-inner); }
+
+/* ── Text — remap dark grays → light equivalents ── */
+.text-gray-900,
+.text-slate-900 { color: #F1F5F9; }   /* slate-100 */
+
+.text-gray-800,
+.text-slate-800 { color: #E2E8F0; }   /* slate-200 */
+
+.text-gray-700,
+.text-slate-700 { color: #CBD5E1; }   /* slate-300 */
+
+.text-gray-600,
+.text-slate-600 { color: #94A3B8; }   /* slate-400 */
+
+.text-gray-500,
+.text-slate-500 { color: #7A8BA0; }   /* between slate-400/500 */
+
+/* ── Divide / separator lines ── */
+.divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--card-border);
+}
+
+/* ── Table header ── */
+.bg-gray-50.border-b { background-color: var(--card-inner); }
+
+/* ── Input fields — browser default is white, force dark ── */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select,
+textarea {
+  background-color: var(--card-inner);
+  color: #E2E8F0;
+}
+
+input::placeholder, textarea::placeholder { color: #4A5568; }
+
+/* ── Input borders ── */
+.border-gray-300 { border-color: #3D4E6A; }
+
+/* ── Hover states ── */
+.hover\:bg-gray-50:hover  { background-color: var(--card-inner) !important; }
+.hover\:bg-gray-100:hover { background-color: #2A3550 !important; }
