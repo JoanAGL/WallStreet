@@ -7,6 +7,7 @@ import RemoveStockButton from "./RemoveStockButton";
 import HorizonSelector from "./HorizonSelector";
 import PurchaseDataEditor from "./PurchaseDataEditor";
 import StockUpdateMenu from "./StockUpdateMenu";
+import SellStockModal from "./SellStockModal";
 import Link from "next/link";
 
 interface Props {
@@ -397,12 +398,22 @@ export default function StockCard({ stock }: Props) {
                     </div>
                   </div>
                 )}
-                <PurchaseDataEditor
-                  ticker={stock.ticker}
-                  purchasePrice={stock.purchasePrice}
-                  quantity={stock.quantity}
-                  purchaseDate={stock.purchaseDate ? stock.purchaseDate.toISOString() : null}
-                />
+                <div className="flex items-center justify-between gap-2">
+                  <PurchaseDataEditor
+                    ticker={stock.ticker}
+                    purchasePrice={stock.purchasePrice}
+                    quantity={stock.quantity}
+                    purchaseDate={stock.purchaseDate ? stock.purchaseDate.toISOString() : null}
+                  />
+                  {hasPurchase && stock.quantity! > 0 && (
+                    <SellStockModal
+                      stockId={stock.id}
+                      ticker={stock.ticker}
+                      availableShares={stock.quantity!}
+                      currentPrice={a?.price ?? null}
+                    />
+                  )}
+                </div>
               </div>
             );
           })()}
