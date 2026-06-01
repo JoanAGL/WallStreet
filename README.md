@@ -55,6 +55,13 @@ Plataforma de análisis de cartera de acciones impulsada por IA. Gestiona hasta 
 - **Cron job diario** — Lunes–viernes a las 08:00 UTC (antes de la apertura de Wall Street a las 14:30 UTC), ejecutado por Vercel Cron
 - **Procesado en batch** — Grupos de hasta 4 acciones por llamada Gemini para minimizar latencia y consumo de API
 
+### Resiliencia y seguridad
+- **Timeouts por servicio** — Cada llamada externa usa `withTimeout`: Finnhub quote 3s, Yahoo histórico 8s, Yahoo fundamentals 6s, NewsAPI por acción 5s (batch 10s), Gemini por acción 25s, Gemini portfolio 30s
+- **Degradación graceful** — Si una fuente falla (timeout o error de red), el análisis continúa con datos parciales en lugar de abortar el stock completo; `DataQuality { technical, fundamentals, news, degraded }` advierte a Gemini cuando los datos son incompletos
+- **Paralelismo en el pipeline** — Fetch de macro y artículos de noticias se lanzan en paralelo (independientes); sentimiento batch y earnings también en paralelo (tras recibir artículos)
+- **Validación CRON_SECRET resistente a timing attacks** — `crypto.timingSafeEqual` + SHA-256 en ambos lados; la comparación tarda tiempo constante independientemente del secreto enviado
+- **System instruction estática** — `STATIC_SYSTEM_INSTRUCTION` se define una vez a nivel de módulo; el contexto dinámico (macro, earnings, riskProfile) va en el mensaje de usuario como JSON compacto, permitiendo que el prefijo del sistema se almacene en la caché KV implícita de Gemini y reduciendo el coste de tokens de entrada en cada llamada batch
+
 ---
 
 ## Stack tecnológico
@@ -121,7 +128,9 @@ src/
 │   ├── analysisHistoryRepository.ts
 │   └── portfolioAnalysisRepository.ts
 ├── lib/                          # Clientes externos y utilidades
-│   ├── geminiClient.ts           # Google Gemini (JSON mode, retries, rate-limit handling)
+│   ├── geminiClient.ts           # Google Gemini (JSON mode, retries, STATIC_SYSTEM_INSTRUCTION)
+│   ├── withTimeout.ts            # Promise.race wrapper con clearTimeout en .finally()
+│   ├── cronAuth.ts               # validateCronSecret (timingSafeEqual), isCronAuthorized
 │   ├── finnhubClient.ts          # Cotizaciones en tiempo real
 │   ├── yahooFinanceClient.ts     # Candles históricos + fundamentales
 │   ├── newsApiClient.ts          # Artículos de noticias
@@ -152,32 +161,36 @@ src/
 
 ### Pipeline de análisis
 
+Cada llamada a API externa está envuelta con `withTimeout`. Si una fuente falla, el análisis continúa con datos parciales (`DataQuality.degraded = true`) y Gemini reduce automáticamente el `confidenceScore`.
+
 ```
 Usuario pulsa "Actualizar"
         │
         ├─ Phase 1: Freshness check (caché 4h por acción)
         │   └─ Acciones con análisis reciente → skipped
         │
-        ├─ Phase 2: Market data (paralelo por acción)
-        │   ├─ getCurrentQuote()           ←─ Finnhub (precio, cambio%)
-        │   ├─ getHistoricalCloses()       ←─ Yahoo Finance (60 días OHLCV)
-        │   └─ fetchAllFundamentals()      ←─ Yahoo quoteSummary
+        ├─ Phase 2: Market data — Promise.allSettled por acción (timeouts individuales)
+        │   ├─ withTimeout(getCurrentQuote(),      3s)  ←─ Finnhub
+        │   ├─ withTimeout(getHistoricalCloses(),  8s)  ←─ Yahoo Finance (60d OHLCV)
+        │   └─ withTimeout(fetchAllFundamentals(), 6s)  ←─ Yahoo quoteSummary
+        │   → Fallo parcial: fallback a precio/datos vacíos, DataQuality.degraded=true
         │
-        ├─ Phase 2b: Quant metrics
+        ├─ Phase 2b: Quant metrics (sobre datos de Phase 2)
         │   └─ calculatePortfolioQuantMetrics()  Sharpe, Kelly, GARCH, correlaciones
         │
-        ├─ Phase 2c: Macro context (caché 4h, Supabase)
-        │   └─ getGlobalContext()          ←─ NewsAPI + Gemini (clasificación impacto)
+        ├─ Phase 2c+3a: PARALELO — fuentes independientes
+        │   ├─ withTimeout(getGlobalContext(),              12s)  ←─ NewsAPI+Gemini (caché 4h)
+        │   └─ withTimeout(fetchAllArticlesInParallel(),   10s)  ←─ NewsAPI batch
         │
-        ├─ Phase 3: News + Earnings (paralelo por acción)
-        │   ├─ fetchArticlesForTicker()    ←─ NewsAPI
-        │   ├─ EarningsService.getGuidanceInsight()  ←─ Gemini (caché 30d)
-        │   └─ batchAnalyzeSentiment()    ←─ 1 llamada Gemini para N acciones
+        ├─ Phase 3b: PARALELO — sentimiento (depende artículos) + earnings (caché 30d)
+        │   ├─ batchAnalyzeSentiment()                  ←─ 1 llamada Gemini para N acciones
+        │   └─ withTimeout(fetchAllEarningsGuidance(),   8s)  ←─ Gemini (caché 30d)
         │
-        ├─ Phase 4: Batch AI — ceil(N/4) llamadas Gemini
+        ├─ Phase 4: Batch AI — ceil(N/4) llamadas Gemini (timeout 25s × N)
         │   └─ batchGenerateAllHorizons()
-        │       shortTerm + mediumTerm + longTerm por acción
-        │       systemInstruction dinámica (macro + earnings como sesgo)
+        │       Mensaje usuario: JSON { ctx:{macro,earnings,risk}, stocks:[...], schema:{...} }
+        │       systemInstruction: STATIC (singleton, cacheable por Gemini KV)
+        │       shortTerm + mediumTerm + longTerm por acción · validación Zod
         │
         └─ Phase 5: Persistencia (paralelo)
             ├─ upsertAnalysis()            ──► PostgreSQL (Supabase)
