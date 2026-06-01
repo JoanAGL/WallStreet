@@ -4,6 +4,7 @@ import type { TechnicalIndicators } from "./technicalAnalysisService";
 import type { NewsAnalysis, Sentiment } from "./newsAnalysisService";
 import type { FundamentalMetrics, MediumTermFundamentals, LongTermFundamentals, AllFundamentals } from "@/lib/yahooFinanceClient";
 import type { InvestmentHorizon } from "@/types/models";
+import { classifyPegValue } from "./quantitativeService";
 import type { PortfolioQuantMetrics } from "./quantitativeService";
 import type { TradingAction } from "@/types/models";
 import type { MacroGlobalContext } from "./macroService";
@@ -340,7 +341,7 @@ export async function generateAllHorizonsAnalysis(
   const stock = {
     ticker, price, chg: changePercent,
     tech:  { rsi14: indicators.rsi14, sma20: indicators.sma20, sma50: indicators.sma50, atr14: indicators.atr14, relVol: indicators.relVolume },
-    fund:  { peg: m.pegRatio, fwdEps: m.forwardEps, revGrowth: m.revenueGrowthYoY, roe: m.returnOnEquity, de: m.debtToEquity, pe: l.trailingPE, divYield: l.dividendYield, margin: l.profitMargin, fcfYield: l.freeCashflowYield, beta: l.beta },
+    fund:  { peg: m.pegRatio, pegLynch: (() => { const p = classifyPegValue(m.pegRatio); return { cls: p.valuationStatus, score: p.pegScore }; })(), fwdEps: m.forwardEps, revGrowth: m.revenueGrowthYoY, roe: m.returnOnEquity, de: m.debtToEquity, pe: l.trailingPE, divYield: l.dividendYield, margin: l.profitMargin, fcfYield: l.freeCashflowYield, beta: l.beta },
     news:  { summary: newsAnalysis.summary, sentiment: newsAnalysis.sentiment },
     fg:    fearGreedScore ?? null,
     quant: quantMetrics ? { sharpe: quantMetrics.sharpeRatio, kelly: quantMetrics.kellyFraction, weight: quantMetrics.portfolioWeight, corr: quantMetrics.correlatedTickers } : null,
@@ -460,6 +461,7 @@ function buildBatchPrompt(
       },
       fund: {
         peg:       m.pegRatio,
+        pegLynch:  (({ valuationStatus: cls, pegScore: score }) => ({ cls, score }))(classifyPegValue(m.pegRatio)),
         fwdEps:    m.forwardEps,
         revGrowth: m.revenueGrowthYoY,
         roe:       m.returnOnEquity,

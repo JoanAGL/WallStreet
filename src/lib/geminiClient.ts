@@ -38,6 +38,15 @@ export const STATIC_SYSTEM_INSTRUCTION =
   "  ctx.risk=Agresivo → permite confidenceScore > 80 con convergencia de señales.\n" +
   "  stock.degraded=true → reduce confidenceScore; infiere con mayor cautela.\n\n" +
 
+  "ANCLA FUNDAMENTAL LYNCH (fund.pegLynch):\n" +
+  "  Cuando fund.pegLynch.cls está presente, úsalo como señal de convicción fundamental para mediumTerm y longTerm.\n" +
+  "  ULTRA_GANGA   (score=100) → sesga COMPRA en mediumTerm/longTerm salvo RSI > 75 o macro impact=HIGH adverso.\n" +
+  "  INFRAVALORADA (score=85)  → sesga moderadamente COMPRA en mediumTerm; neutral en shortTerm.\n" +
+  "  JUSTA         (score=60)  → señal neutra; no eleva ni reduce confidenceScore por sí sola.\n" +
+  "  SOBREVALORADA (score=20)  → limita confidenceScore de COMPRA a ≤ 40 en mediumTerm/longTerm.\n" +
+  "  NO_DISPONIBLE             → ignora pegLynch; basa la señal exclusivamente en métricas disponibles.\n" +
+  "  El score Lynch puede sumarse proporcionalmente al confidenceScore final (peso 0.25) junto a señales técnicas y macro.\n\n" +
+
   "REGLAS ABSOLUTAS:\n" +
   "(1) Proyecciones algorítmicas informativas — NO asesoramiento financiero personalizado.\n" +
   "(2) executionPriceLimit es nivel técnico de referencia, no precio garantizado.\n" +

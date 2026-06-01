@@ -144,3 +144,49 @@ export function findTickerMetrics(
 ): PortfolioQuantMetrics | null {
   return allMetrics.find((m) => m.ticker === ticker) ?? null;
 }
+
+// ── Peter Lynch PEG Ratio ─────────────────────────────────────────────────────
+
+export type PegClassification =
+  | "ULTRA_GANGA"
+  | "INFRAVALORADA"
+  | "JUSTA"
+  | "SOBREVALORADA"
+  | "NO_DISPONIBLE";
+
+export interface PegInsight {
+  /** Computed PEG value; 0 when unavailable */
+  pegRatio: number;
+  valuationStatus: PegClassification;
+  /** Conviction score per Lynch thresholds: 100 | 85 | 60 | 20 | 50 (unavailable) */
+  pegScore: number;
+}
+
+const NO_PEG: PegInsight = { pegRatio: 0, valuationStatus: "NO_DISPONIBLE", pegScore: 50 };
+
+function applyLynchThresholds(peg: number): PegInsight {
+  if (peg < 0.5)  return { pegRatio: peg, valuationStatus: "ULTRA_GANGA",   pegScore: 100 };
+  if (peg < 1.0)  return { pegRatio: peg, valuationStatus: "INFRAVALORADA", pegScore: 85 };
+  if (peg <= 1.5) return { pegRatio: peg, valuationStatus: "JUSTA",         pegScore: 60 };
+  return             { pegRatio: peg, valuationStatus: "SOBREVALORADA",  pegScore: 20 };
+}
+
+/**
+ * Classifies a pre-computed PEG ratio using Peter Lynch thresholds.
+ * Returns NO_DISPONIBLE (pegScore 50) for null, non-finite, zero, or negative inputs.
+ */
+export function classifyPegValue(peg: number | null | undefined): PegInsight {
+  if (peg == null || !isFinite(peg) || peg <= 0) return NO_PEG;
+  return applyLynchThresholds(peg);
+}
+
+/**
+ * Computes and classifies the Peter Lynch PEG ratio from raw components.
+ * @param per       - Price-to-Earnings ratio (must be > 0 and finite)
+ * @param epsGrowth - Expected EPS growth as integer percentage, e.g. 15 for 15% (must be > 0)
+ * Returns NO_DISPONIBLE (pegScore 50) if either input is invalid.
+ */
+export function calculatePeterLynchPeg(per: number, epsGrowth: number): PegInsight {
+  if (!isFinite(per) || per <= 0 || !isFinite(epsGrowth) || epsGrowth <= 0) return NO_PEG;
+  return applyLynchThresholds(per / epsGrowth);
+}

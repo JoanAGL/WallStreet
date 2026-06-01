@@ -1,6 +1,6 @@
 # My Personal Advisor
 
-Plataforma de análisis de cartera de acciones impulsada por IA. Gestiona hasta 10 acciones con análisis técnico, fundamental y contextual multi-horizonte generado por Google Gemini 2.5 Flash Lite, junto con herramientas cuantitativas avanzadas (Monte Carlo, stress testing, optimización Black-Litterman, correlación). Uso académico e informativo — no constituye asesoramiento financiero.
+Plataforma de análisis de cartera de acciones impulsada por IA. Gestiona hasta 20 acciones con análisis técnico, fundamental y contextual multi-horizonte generado por Google Gemini 2.5 Flash Lite, junto con herramientas cuantitativas avanzadas (Monte Carlo, stress testing, optimización Black-Litterman, correlación). Uso académico e informativo — no constituye asesoramiento financiero.
 
 **Demo:** [wall-street-jan.vercel.app](https://wall-street-jan.vercel.app)
 
@@ -11,9 +11,10 @@ Plataforma de análisis de cartera de acciones impulsada por IA. Gestiona hasta 
 ### Análisis de acciones
 - **Análisis multi-horizonte** — Escenarios Positivo / Neutral / Negativo para corto plazo (técnico), medio plazo (fundamentales) y largo plazo (valor), generados en una sola llamada Gemini por acción
 - **Señales algorítmicas** — Acción prescriptiva (COMPRA / VENTA / MANTENER / REDUCIR) con `confidenceScore` 0–100, nivel técnico de referencia (`executionPriceLimit`) y justificación cuantitativa
-- **Indicadores técnicos** — SMA20, SMA50, RSI14, ATR14, volumen relativo, exponente de Hurst (R/S)
+- **Indicadores técnicos** — SMA20, SMA50, RSI14, ATR14, volumen relativo, exponente de Hurst (R/S), serie RSI completa para detección de divergencia
 - **Fundamentales** — PEG ratio, EPS forward, ROE, Deuda/Equity (medio plazo); P/E trailing, Dividend Yield, margen neto, FCF Yield, Beta (largo plazo)
-- **Divergencia técnico-sentimiento** — Alerta cuando indicadores técnicos y sentimiento noticioso apuntan en direcciones opuestas
+- **Divergencia precio/RSI clásica** — Detecta los cuatro tipos canónicos comparando máximos/mínimos de precio y RSI entre dos mitades de una ventana de 14 barras: `REGULAR_BEARISH` (precio HH, RSI LH — agotamiento alcista), `REGULAR_BULLISH` (precio LL, RSI HL — suelo potencial), `HIDDEN_BEARISH` (precio LH, RSI HH — continuación bajista), `HIDDEN_BULLISH` (precio HL, RSI LL — continuación alcista). Intensidad `WEAK / MODERATE / STRONG` según delta RSI (>5 pts / >10 pts). Badge rojo/verde en `StockCard` con tooltip descriptivo (ej. "Precio +3.2% pero RSI -8pts en 14 días")
+- **Divergencia técnico-sentimiento (IA)** — Alerta separada cuando los indicadores técnicos y el sentimiento noticioso apuntan en direcciones opuestas, generada por Gemini por horizonte
 - **Alertas de cartera por acción** — Detecta solapamiento de correlación con el resto de posiciones dentro del análisis de cada horizonte
 
 ### Contexto de mercado
@@ -21,6 +22,22 @@ Plataforma de análisis de cartera de acciones impulsada por IA. Gestiona hasta 
 - **Contexto macroeconómico** — Clasificación de noticias globales (bancos centrales, geopolítica, inflación/PIB) con nivel de impacto HIGH / MEDIUM / LOW e inyección automática como sesgo en el análisis IA; caché 4h en Supabase
 - **Earnings guidance** — Inferencia del guidance corporativo más reciente (sentimiento EXPANSIVO / PRUDENTE / CONTRACTIVO, revenue YoY, EPS status, citas CEO/CFO); caché 30 días (una inferencia por trimestre fiscal)
 - **Índice Fear & Greed propio** — Compuesto de RSI (40%) + sentimiento noticioso (60%), escala 0–100
+
+### Motor de Valoración Fundamental (Peter Lynch PEG Ratio)
+
+El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo la metodología de Peter Lynch en `quantitativeService.ts`. El cálculo es matemáticamente defensivo: cualquier valor nulo, negativo, cero o no finito en el PER o en la tasa de crecimiento del EPS devuelve `NO_DISPONIBLE` con `pegScore: 50` (neutral), evitando divisiones por cero o resultados `NaN`/`Infinity`.
+
+**Rangos de clasificación y scores de convicción:**
+
+| PEG | Clasificación | `pegScore` | Significado |
+|-----|--------------|-----------|-------------|
+| < 0.5 | `ULTRA_GANGA` | 100 | Crecimiento cotiza muy por debajo de su valor intrínseco |
+| 0.5 – < 1.0 | `INFRAVALORADA` | 85 | Precio atractivo respecto al crecimiento esperado |
+| 1.0 – 1.5 | `JUSTA` | 60 | Valoración equilibrada; Lynch la considera el umbral neutro |
+| > 1.5 | `SOBREVALORADA` | 20 | Precio excesivo respecto al crecimiento; reduce convicción de compra |
+| inválido | `NO_DISPONIBLE` | 50 | Dato no disponible; señal ignorada en el prompt |
+
+**Integración en el pipeline:** el insight PEG (`valuationStatus` + `pegScore`) se inyecta como campo `fund.pegLynch` en el payload JSON enviado a Gemini en la Fase 4 del pipeline. La instrucción estática de sistema (`STATIC_SYSTEM_INSTRUCTION`) le indica al modelo que use `pegLynch` como **ancla fundamental de convicción** para los horizontes `mediumTerm` y `longTerm`: un status `ULTRA_GANGA` sesga hacia COMPRA salvo RSI sobrecomprado o macro adverso; `SOBREVALORADA` limita el `confidenceScore` de COMPRA a ≤ 40. El `pegScore` contribuye con peso 0.25 al `confidenceScore` final junto a señales técnicas (RSI, ATR), cuantitativas (Sharpe, Kelly, Fear & Greed) y macro (earnings guidance, contexto global).
 
 ### Métricas cuantitativas de cartera
 - **Sharpe ratio** — Anualizado con tasa libre de riesgo configurable (default 3.5%)
@@ -30,7 +47,7 @@ Plataforma de análisis de cartera de acciones impulsada por IA. Gestiona hasta 
 - **Portfolio weight** — Peso relativo de cada posición según valor de mercado actual
 
 ### Herramientas de análisis avanzado
-- **Simulación Monte Carlo** — 1 000 trayectorias, horizontes configurables (1–30 años), aportaciones mensuales opcionales; métricas: VaR95, CVaR95, percentiles p10/p25/p50/p75/p90, probabilidad de pérdida
+- **Simulación Monte Carlo** — 1 000 trayectorias GBM, horizontes configurables (1–30 años), aportaciones mensuales opcionales; distribución t de Student df=5 por defecto (fat tails, VaR95 ~15–25% más conservador que GBM normal); métricas: VaR95, CVaR95, percentiles p10/p25/p50/p75/p90, probabilidad de pérdida. Parámetros `distribution` y `degreesOfFreedom` configurables via API para comparativa NORMAL vs STUDENT_T
 - **Stress Testing histórico** — 5 escenarios: Crisis 2008 (-56.5%, 356d), COVID 2020 (-34%, 33d), Subida tipos 2022 (-25.5%, 282d), Punto com 2000 (-49.1%, 638d), Lunes negro 1987 (-33.6%, 101d); calcula pérdida total, valor final y días estimados de recuperación
 - **Optimización Black-Litterman** — Prior de equilibrio de mercado + vistas de retorno esperado generadas por Gemini + combinación bayesiana (τ=0.05, δ=2.5); fallback a Markowitz si matriz singular o sin vistas
 - **Markowitz (Varianza Mínima)** — Gradiente descendente (3 000 pasos), sin posiciones cortas, shrinkage de Ledoit-Wolf simplificada (α=0.2)
@@ -43,11 +60,12 @@ Plataforma de análisis de cartera de acciones impulsada por IA. Gestiona hasta 
 - **Inyección en análisis IA** — El perfil del inversor se incluye en cada llamada a Gemini como contexto de aversión al riesgo
 
 ### Gestión de cartera
-- **Hasta 10 acciones** — NYSE y NASDAQ, validadas en tiempo real contra Yahoo Finance antes de añadir
+- **Hasta 20 acciones** — NYSE y NASDAQ, validadas en tiempo real contra Yahoo Finance antes de añadir. Con batch de 4, 20 acciones = 5 llamadas Gemini (~185s en el peor caso; requiere Vercel Pro o superior para el cron)
 - **P&L por posición** — Precio de compra, cantidad, fecha, coste base, valor actual, ganancia/pérdida en USD y %
 - **Historial de análisis** — Snapshots automáticos (escenario, RSI, precio) con retención de 30 días e índice DESC por fecha
 - **Análisis global de cartera** — Resumen IA de diversificación, riesgo agregado y recomendaciones de rebalanceo (mínimo 2 acciones con análisis)
 - **Benchmark de cartera** — Comparación de rendimiento vs índice de referencia
+- **Exportación CSV** — `GET /api/portfolio/export?format=csv` descarga un CSV con 34 campos por acción: precio, cambio %, escenario activo, confidenceScore, indicadores técnicos (RSI14, SMA20/50, ATR14, volumen relativo), escenarios por horizonte (corto/medio/largo plazo), divergencia precio/RSI, datos de posición (precio compra, cantidad, coste base, valor actual, P&L en USD y %), y timestamp de generación. Requiere sesión autenticada; solo exporta datos del usuario en sesión. Botón «↓ CSV» en el resumen de cartera
 
 ### Actualización de datos
 - **Actualización manual** — Botón en dashboard con caché de 4h; muestra resultado completo: actualizadas · en caché · con error (con tickers afectados)
@@ -99,7 +117,8 @@ src/
 │   │   │   ├── correlation/      # GET: matriz de correlación
 │   │   │   ├── optimize/         # GET: Black-Litterman
 │   │   │   ├── rebalance/        # POST: rebalanceo + tax harvesting
-│   │   │   └── simulation/       # POST: Monte Carlo + stress tests
+│   │   │   ├── simulation/       # POST: Monte Carlo + stress tests
+│   │   │   └── export/           # GET: exportación CSV de cartera (?format=csv)
 │   │   ├── market/top-gainers/   # GET: top movers Finnhub
 │   │   ├── macro/flash/          # GET: contexto macro (caché 4h)
 │   │   ├── search/               # GET: búsqueda de tickers
@@ -115,12 +134,12 @@ src/
 ├── services/                     # Lógica de negocio
 │   ├── analysisOrchestrator.ts   # Pipeline principal multi-fase
 │   ├── aiAnalysisService.ts      # Análisis multi-horizonte + batch Gemini
-│   ├── technicalAnalysisService.ts # SMA, RSI, ATR, RelVol, Hurst
+│   ├── technicalAnalysisService.ts # SMA, RSI, RSISeries, ATR, RelVol, Hurst, divergencia precio/RSI
 │   ├── newsAnalysisService.ts    # Sentimiento batch de noticias
 │   ├── marketDataService.ts      # Precio actual e histórico
 │   ├── macroService.ts           # Contexto macro global (caché Supabase)
 │   ├── earningsService.ts        # Guidance de earnings (caché 30d)
-│   ├── quantitativeService.ts    # Sharpe, Kelly, GARCH, correlaciones, Fear&Greed
+│   ├── quantitativeService.ts    # Sharpe, Kelly, GARCH, correlaciones, Fear&Greed, PEG Lynch
 │   └── portfolioAIService.ts     # Análisis global de cartera
 ├── repositories/                 # Acceso a Prisma/PostgreSQL
 │   ├── stockRepository.ts
@@ -134,8 +153,19 @@ src/
 │   ├── finnhubClient.ts          # Cotizaciones en tiempo real
 │   ├── yahooFinanceClient.ts     # Candles históricos + fundamentales
 │   ├── newsApiClient.ts          # Artículos de noticias
-│   ├── portfolioMath.ts          # Pearson, dailyReturns, Monte Carlo, Black-Litterman,
-│   │                             # stress tests, Markowitz, tax harvesting
+│   ├── portfolioMath.ts          # @deprecated — re-exporta src/lib/math/* (retrocompatibilidad)
+│   ├── math/                     # Módulos matemáticos por responsabilidad
+│   │   ├── index.ts              # Re-exporta todos los módulos
+│   │   ├── returns.ts            # dailyReturns
+│   │   ├── correlation.ts        # pearson, calculateCorrelationMatrix
+│   │   ├── riskMetrics.ts        # (reservado: sharpe, kelly, garch)
+│   │   ├── taxHarvesting.ts      # detectHarvestOpportunities, ETF alternativos
+│   │   ├── optimization/
+│   │   │   ├── markowitz.ts      # runPortfolioOptimization, shrinkCovariance, gradiente
+│   │   │   └── blackLitterman.ts # runBlackLitterman, fallback a markowitz
+│   │   └── simulation/
+│   │       ├── monteCarlo.ts     # runMonteCarlo, sampleStudentT (t df=5 por defecto), VaR95, CVaR95
+│   │       └── stressTest.ts     # runStressTests, 5 escenarios históricos
 │   ├── cacheStore.ts             # Caché Supabase con fallback en memoria
 │   ├── auth.ts                   # authOptions (NextAuth)
 │   └── prisma.ts                 # Singleton Prisma Client
@@ -221,7 +251,8 @@ StockAnalysis
   id · stockId → Stock (unique)
   price · changePercent · sma20? · sma50? · rsi14?
   newsSummary · newsSentiment
-  analysisText · scenarioLabel · scenarioJustification · divergenceAlert
+  analysisText · scenarioLabel · scenarioJustification
+  divergenceAlert? (JSONB — PriceRsiDivergence: type · strength · description)
   horizonMatch? · keyMetrics? (JSON) · metricsData? (JSON) · allHorizons? (JSON)
   generatedAt · updatedAt (@updatedAt — auto)
 
