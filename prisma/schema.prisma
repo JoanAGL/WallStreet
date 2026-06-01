@@ -25,6 +25,7 @@ model User {
   stocks            Stock[]
   portfolioAnalysis PortfolioAnalysis?
   userProfile       UserProfile?
+  manualSellEntries ManualSellEntry[]
 }
 
 model UserProfile {
@@ -141,6 +142,26 @@ model Transaction {
   createdAt DateTime        @default(now())
 
   @@index([stockId, createdAt(sort: Desc)])
+}
+
+// Manual sell entries — historical positions not tracked in the dashboard.
+model ManualSellEntry {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticker           String
+  shares           Float
+  avgBuyPrice      Float
+  sellPrice        Float
+  investedAmount   Float
+  revenueAmount    Float
+  profitAmount     Float
+  profitPercentage Float
+  date             DateTime @default(now())
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  @@index([userId, date(sort: Desc)])
 }
 
 // Shared persistent cache for cross-request data (macro context, earnings guidance).

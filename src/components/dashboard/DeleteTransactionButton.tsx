@@ -4,19 +4,22 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 interface Props {
-  transactionId: string;
+  /** Full API path to DELETE, e.g. /api/portfolio/transactions/:id or /api/portfolio/history/manual/:id */
+  deleteUrl:     string;
+  confirmMessage?: string;
 }
 
-export default function DeleteTransactionButton({ transactionId }: Props) {
+export default function DeleteTransactionButton({ deleteUrl, confirmMessage }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   function handleDelete() {
-    if (!confirm("¿Eliminar esta venta del historial? Los cálculos WAC se recalcularán automáticamente.")) return;
+    const msg = confirmMessage ?? "¿Eliminar esta entrada del historial? Esta acción no se puede deshacer.";
+    if (!confirm(msg)) return;
     setError(null);
     startTransition(async () => {
-      const res = await fetch(`/api/portfolio/transactions/${transactionId}`, { method: "DELETE" });
+      const res = await fetch(deleteUrl, { method: "DELETE" });
       if (res.ok) {
         router.refresh();
       } else {
@@ -27,17 +30,19 @@ export default function DeleteTransactionButton({ transactionId }: Props) {
   }
 
   return (
-    <span className="inline-flex flex-col items-end gap-0.5">
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
       <button
         onClick={handleDelete}
         disabled={isPending}
-        className="text-gray-400 hover:text-red-500 transition-colors disabled:opacity-40 text-xs px-1"
-        title="Eliminar esta transacción de venta"
-        aria-label="Eliminar venta"
+        style={{ color: "var(--fg-5)", fontSize: 13, padding: "0 4px", background: "none", border: 0, cursor: "pointer", transition: "color .15s", opacity: isPending ? .4 : 1 }}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "#F87171")}
+        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = "var(--fg-5)")}
+        title="Eliminar"
+        aria-label="Eliminar entrada"
       >
         {isPending ? "…" : "✕"}
       </button>
-      {error && <span className="text-xs text-red-500">{error}</span>}
+      {error && <span style={{ fontSize: 11, color: "#F87171" }}>{error}</span>}
     </span>
   );
 }

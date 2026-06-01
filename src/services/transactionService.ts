@@ -240,9 +240,10 @@ export async function getStockMetrics(
 // ── Sell history (per-sell WAC P&L) ──────────────────────────────────────────
 
 export interface SellHistoryEntry {
-  id:               string;   // transaction id — used for delete
+  id:               string;
+  source:           "transaction" | "manual";  // determines delete endpoint
   ticker:           string;
-  stockId:          string;
+  stockId:          string | null;
   shares:           number;
   avgCostAtSale:    number;
   sellPrice:        number;
@@ -264,6 +265,7 @@ export interface SellHistorySummary {
 
 export async function getTransactionHistory(userId: string): Promise<SellHistorySummary> {
   const { prisma } = await import("@/lib/prisma");
+  const { getManualSellsByUser } = await import("@/repositories/manualSellRepository");
 
   const stocks = await prisma.stock.findMany({
     where:  { userId },
@@ -280,6 +282,7 @@ export async function getTransactionHistory(userId: string): Promise<SellHistory
 
   const entries: SellHistoryEntry[] = [];
 
+  // ── Transaction-based SELL entries (WAC computed) ─────────────────────────
   for (const [stockId, stockTxs] of Array.from(byStock.entries())) {
     const ticker = tickerMap.get(stockId) ?? stockId;
     const sorted = [...stockTxs].sort((a, b) => {
@@ -297,16 +300,17 @@ export async function getTransactionHistory(userId: string): Promise<SellHistory
         openShares      = r2(openShares + tx.shares);
         avgCost         = openShares > 0 ? totalCost / openShares : 0;
       } else {
-        const sellable        = Math.min(tx.shares, openShares);
-        const investedAmount  = r2(sellable * avgCost);
-        const revenueAmount   = r2(sellable * tx.price);
-        const profitAmount    = r2(revenueAmount - investedAmount);
-        const profitPct       = investedAmount > 0 ? r2((profitAmount / investedAmount) * 100) : 0;
+        const sellable       = Math.min(tx.shares, openShares);
+        const investedAmount = r2(sellable * avgCost);
+        const revenueAmount  = r2(sellable * tx.price);
+        const profitAmount   = r2(revenueAmount - investedAmount);
+        const profitPct      = investedAmount > 0 ? r2((profitAmount / investedAmount) * 100) : 0;
 
         openShares = r2(Math.max(0, openShares - sellable));
 
         entries.push({
           id:               tx.id,
+          source:           "transaction",
           ticker,
           stockId,
           shares:           sellable,
@@ -323,11 +327,31 @@ export async function getTransactionHistory(userId: string): Promise<SellHistory
     }
   }
 
+  // ── Manual entries (historical positions not in dashboard) ────────────────
+  const manual = await getManualSellsByUser(userId);
+  for (const m of manual) {
+    entries.push({
+      id:               m.id,
+      source:           "manual",
+      ticker:           m.ticker,
+      stockId:          null,
+      shares:           m.shares,
+      avgCostAtSale:    m.avgBuyPrice,
+      sellPrice:        m.sellPrice,
+      investedAmount:   m.investedAmount,
+      revenueAmount:    m.revenueAmount,
+      profitAmount:     m.profitAmount,
+      profitPercentage: m.profitPercentage,
+      date:             m.date,
+      notes:            m.notes ?? null,
+    });
+  }
+
   entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const totalInvested = r2(entries.reduce((s, e) => s + e.investedAmount, 0));
-  const totalRevenue  = r2(entries.reduce((s, e) => s + e.revenueAmount,  0));
-  const totalProfit   = r2(totalRevenue - totalInvested);
+  const totalInvested  = r2(entries.reduce((s, e) => s + e.investedAmount, 0));
+  const totalRevenue   = r2(entries.reduce((s, e) => s + e.revenueAmount,  0));
+  const totalProfit    = r2(totalRevenue - totalInvested);
   const totalProfitPct = totalInvested > 0 ? r2((totalProfit / totalInvested) * 100) : 0;
 
   return { entries, totalInvested, totalRevenue, totalProfit, totalProfitPct };
