@@ -71,6 +71,12 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 - **Sistema de transacciones (WAC)** — Motor completo de registro de compras y ventas por posición usando el método de Coste Medio Ponderado (Weighted Average Cost). Cada transacción almacena: tipo (BUY/SELL), acciones, precio medio, fecha (opcional) y notas (opcional). El servicio calcula en tiempo real: precio medio de compra WAC dinámico (se recalcula con cada BUY en orden cronológico), precio medio de venta, coste base abierto, valor actual, PnL no realizado ($ y %), PnL realizado ($ y %), precio de equilibrio (= avgBuyPrice), días en cartera (desde primera transacción con fecha), rentabilidad anualizada CAGR (`((totalFinal/totalInvertido)^(365/días))−1`) y peso en cartera (%). API: `POST /api/portfolio/transactions` (registrar BUY o SELL), `GET /api/portfolio/transactions?stockId=xxx&currentPrice=yyy` (métricas + historial), `DELETE /api/portfolio/transactions/[id]` (eliminar transacción). Panel «Transacciones» plegable en cada `StockCard` con formulario inline, métricas compactas y lista de operaciones con posibilidad de eliminar
 - **Vista global de rendimiento** — `/dashboard/portfolio` muestra todas las posiciones con transacciones, agregados globales (valor actual total, coste base total, PnL no realizado + %, PnL realizado, PnL total) y detalle por posición con todas las métricas; accesible desde «Rendimiento →» en el resumen de cartera
 
+### Diseño visual
+- **Paleta fintech** — Header oscuro `#1B2130` estilo MyInvestor; fondo de app `#EEF0F4` gris frío estilo DeGiro; tarjetas blancas con `shadow-sm` que destacan sobre el fondo
+- **Tipografía** — Inter via `next/font/google`; antialiasing activado; scrollbar fino personalizado
+- **Badges de perfil de riesgo** — Pills semi-transparentes (sky/amber/red sobre fondo oscuro) adaptados al header oscuro
+- **Sin dark-mode automático** — Estilos fijos para evitar problemas de contraste en sistemas con preferencia oscura
+
 ### Actualización de datos
 - **Actualización manual** — Botón en dashboard con caché de 4h; muestra resultado completo: actualizadas · en caché · con error (con tickers afectados)
 - **Actualización parcial** — Opciones individuales: solo precio, solo técnicos, solo noticias (sin consumir créditos IA)
@@ -91,7 +97,7 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 | Capa | Tecnología | Versión |
 |------|-----------|---------|
 | Framework | Next.js (App Router) + TypeScript | 14.2.35 / 5 |
-| UI | Tailwind CSS | 3.3.0 |
+| UI | Tailwind CSS + Inter (next/font) | 3.3.0 |
 | Auth | NextAuth.js (JWT, Credentials) + bcryptjs | 4.24.14 / 3.0.3 |
 | ORM | Prisma | 5.22.0 |
 | Base de datos | PostgreSQL — Supabase | — |
