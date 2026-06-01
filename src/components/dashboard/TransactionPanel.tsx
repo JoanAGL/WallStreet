@@ -108,7 +108,7 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
         className="flex items-center justify-between w-full text-left"
       >
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-          Transacciones
+          Transacciones {ticker}
         </span>
         <span className="text-xs text-blue-500">
           {open ? "Ocultar ▲" : "Ver detalle ▼"}
