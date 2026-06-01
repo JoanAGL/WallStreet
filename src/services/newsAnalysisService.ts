@@ -150,7 +150,7 @@ Noticias (últimas 48h):
 ${sections}`;
 
   try {
-    const raw = await geminiChat(prompt, 150 * active.length, 2, {
+    const raw = await geminiChat(prompt, 250 * active.length, 2, {
       systemInstruction:
         "Motor de análisis de noticias financieras. Responde únicamente con JSON válido.",
       jsonMode: true,

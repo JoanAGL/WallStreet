@@ -30,20 +30,46 @@ export default function UpdateButton({ lastUpdatedAt }: Props) {
     setError(null);
     setSuccessMsg(null);
 
-    const res = await fetch("/api/update", { method: "POST" });
-    const data = await res.json();
+    try {
+      const res = await fetch("/api/update", { method: "POST" });
+      const data = await res.json();
 
-    setLoading(false);
+      setLoading(false);
 
-    if (!res.ok) {
-      setError(data.error ?? "Error al actualizar");
-      return;
+      if (!res.ok) {
+        setError(data.error ?? "Error al actualizar");
+        return;
+      }
+
+      const succeeded: number = data.succeeded ?? 0;
+      const cached: number    = data.cached    ?? 0;
+      const failed: Array<{ ticker: string; error?: string }> = data.failed ?? [];
+
+      const parts: string[] = [];
+      if (succeeded > 0) {
+        parts.push(`${succeeded} acción${succeeded !== 1 ? "es" : ""} actualizada${succeeded !== 1 ? "s" : ""}`);
+      }
+      if (cached > 0) {
+        parts.push(`${cached} en caché (análisis reciente)`);
+      }
+      if (failed.length > 0) {
+        const tickers = failed.map((f) => f.ticker).join(", ");
+        parts.push(`${failed.length} con error (${tickers})`);
+      }
+
+      if (parts.length === 0) {
+        setSuccessMsg("Sin cambios.");
+      } else if (succeeded === 0 && failed.length === 0 && cached > 0) {
+        setSuccessMsg(`Sin cambios — ${cached} acción${cached !== 1 ? "es" : ""} en caché (análisis reciente, < 4h).`);
+      } else {
+        setSuccessMsg(parts.join(" · ") + ".");
+      }
+
+      router.refresh();
+    } catch {
+      setLoading(false);
+      setError("Error de conexión al actualizar. Inténtalo de nuevo.");
     }
-
-    setSuccessMsg(
-      `${data.succeeded} acción${data.succeeded !== 1 ? "es" : ""} actualizada${data.succeeded !== 1 ? "s" : ""} correctamente.`
-    );
-    router.refresh();
   }
 
   return (
