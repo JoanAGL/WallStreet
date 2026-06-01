@@ -1,5 +1,6 @@
 import {
   createTransaction,
+  updateTransaction,
   getTransactionsByStock,
   getTransactionsByUser,
   findTransactionByIdAndUser,
@@ -175,6 +176,45 @@ export async function addTransaction(
   }
 
   return createTransaction({ stockId, type, shares, price, date: date ?? null, notes: notes ?? null });
+}
+
+export interface TransactionPatch {
+  type?:   TransactionType;
+  shares?: number;
+  price?:  number;
+  date?:   Date | null;
+  notes?:  string | null;
+}
+
+export async function editUserTransaction(
+  userId:        string,
+  transactionId: string,
+  patch:         TransactionPatch
+): Promise<TransactionRecord> {
+  const tx = await findTransactionByIdAndUser(transactionId, userId);
+  if (!tx) throw new Error("Transacción no encontrada o no pertenece al usuario.");
+
+  if (patch.shares !== undefined && (patch.shares <= 0 || !isFinite(patch.shares)))
+    throw new Error("Las acciones deben ser un número positivo.");
+  if (patch.price  !== undefined && (patch.price  <= 0 || !isFinite(patch.price)))
+    throw new Error("El precio debe ser un número positivo.");
+
+  // If changing type to SELL or updating shares on a SELL, validate available shares
+  const effectiveType   = patch.type   ?? tx.type;
+  const effectiveShares = patch.shares ?? tx.shares;
+  if (effectiveType === "SELL") {
+    const allTxs  = await getTransactionsByStock(tx.stockId);
+    // Compute open shares excluding the current transaction, then check
+    const others  = allTxs.filter((t) => t.id !== transactionId);
+    const metrics = calculatePositionMetrics(others, tx.stockId, "", null);
+    if (effectiveShares > metrics.openShares + 1e-9) {
+      throw new Error(
+        `Acciones insuficientes. Tienes ${metrics.openShares} disponibles (sin contar esta transacción).`
+      );
+    }
+  }
+
+  return updateTransaction(transactionId, patch);
 }
 
 export async function deleteUserTransaction(

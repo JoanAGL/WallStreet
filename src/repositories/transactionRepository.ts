@@ -55,6 +55,16 @@ export async function findTransactionByIdAndUser(
   }) as unknown as TransactionRecord | null;
 }
 
+export async function updateTransaction(
+  id:   string,
+  data: Partial<Omit<TransactionData, "stockId">>
+): Promise<TransactionRecord> {
+  return prisma.transaction.update({
+    where: { id },
+    data,
+  }) as unknown as TransactionRecord;
+}
+
 export async function deleteTransaction(id: string): Promise<void> {
   await prisma.transaction.delete({ where: { id } });
 }
