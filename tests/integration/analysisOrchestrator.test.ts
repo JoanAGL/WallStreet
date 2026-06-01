@@ -28,6 +28,7 @@ import {
 
 vi.mock("@/lib/geminiClient", () => ({
   geminiChat: vi.fn(),
+  STATIC_SYSTEM_INSTRUCTION: "mocked-static-system-instruction",
 }));
 
 vi.mock("@/services/marketDataService", () => ({

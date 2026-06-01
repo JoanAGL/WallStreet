@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { geminiChat } from "@/lib/geminiClient";
+import { geminiChat, STATIC_SYSTEM_INSTRUCTION } from "@/lib/geminiClient";
 import type { TechnicalIndicators } from "./technicalAnalysisService";
 import type { NewsAnalysis, Sentiment } from "./newsAnalysisService";
 import type { FundamentalMetrics, MediumTermFundamentals, LongTermFundamentals, AllFundamentals } from "@/lib/yahooFinanceClient";
@@ -262,182 +262,24 @@ export const FALLBACK_HORIZON: HorizonAnalysis = {
   },
 };
 
-// Institutional system instruction — role, output contract, language policy.
-// Constraints are framed as algorithmic-projection guidelines, not prohibitions on signals.
-const SYSTEM_INSTRUCTION_ALL =
-  "Eres un motor de análisis cuantitativo financiero automatizado al nivel de un Robo-Advisor institucional. " +
-  "Tu función es generar proyecciones algorítmicas informativas basadas exclusivamente en datos matemáticos de mercado. " +
-  "Reglas absolutas: " +
-  "(1) Las señales de acción (COMPRA/VENTA/MANTENER/REDUCIR) son proyecciones algorítmicas informativas que NO constituyen asesoramiento financiero personalizado. " +
-  "(2) El executionPriceLimit es un nivel técnico de referencia, no un precio garantizado. " +
-  "(3) Tu lenguaje debe ser sobrio, técnico y en castellano. " +
-  "(4) Responde únicamente con JSON válido, sin texto adicional ni markdown.";
-
-function formatQuantBlock(q: PortfolioQuantMetrics): string {
-  const corrStr = q.correlatedTickers.length > 0
-    ? q.correlatedTickers
-        .map((c) => `${c.ticker}=${c.correlationFactor.toFixed(2)}`)
-        .join(", ")
-    : "Sin otros activos en cartera";
-  return [
-    `Ratio de Sharpe: ${q.sharpeRatio.toFixed(2)}`,
-    `Volatilidad anualizada (30d): ${q.volatility30d.toFixed(1)}%`,
-    `Peso en cartera: ${q.portfolioWeight.toFixed(1)}%`,
-    `Correlación con cartera: ${corrStr}`,
-  ].join(" | ");
-}
-
-/**
- * Builds a dynamic system instruction that injects macro and earnings context
- * as background knowledge for the model, so it applies a consistent macro bias
- * across all three horizon analyses without repeating it in the user prompt.
- */
-function buildDynamicSystemInstruction(
-  macroContext?: MacroGlobalContext | null,
-  earningsGuidance?: EarningsGuidanceInsight | null
-): string {
-  let instruction = SYSTEM_INSTRUCTION_ALL;
-
-  if (macroContext && macroContext.items.length > 0) {
-    const lines = macroContext.items.map((item) => {
-      const sectors = item.affectedSectors.length > 0 ? ` [${item.affectedSectors.join(", ")}]` : "";
-      return `  • [${item.impactLevel}]${sectors} ${item.title}`;
-    });
-    instruction += `\n\nCONTEXTO MACROECONÓMICO GLOBAL (últimas 24h):\n${lines.join("\n")}`;
-    if (macroContext.items.some((i) => i.impactLevel === "HIGH")) {
-      instruction +=
-        "\nSESGO MACRO: Hay eventos de impacto HIGH activos. Reduce el confidenceScore en señales COMPRA " +
-        "y justifica explícitamente el riesgo macro en quantitativeJustification.";
-    }
-  }
-
-  if (earningsGuidance) {
-    const rev = earningsGuidance.revenueGuidanceYoY != null
-      ? `${earningsGuidance.revenueGuidanceYoY > 0 ? "+" : ""}${earningsGuidance.revenueGuidanceYoY}% YoY`
-      : "no declarado";
-    const quote = earningsGuidance.keyCeoQuotes[0] ?? "";
-    instruction +=
-      `\n\nGUIDANCE CORPORATIVO (${earningsGuidance.fiscalQuarter}):` +
-      `\n  • Sentimiento directiva: ${earningsGuidance.sentiment}` +
-      `\n  • Revenue guidance: ${rev} | EPS: ${earningsGuidance.epsGuidanceStatus}` +
-      (quote ? `\n  • CEO/CFO: "${quote}"` : "") +
-      `\n  • Contexto: ${earningsGuidance.macroImpactJustification}`;
-    if (earningsGuidance.sentiment === "CONTRACTIVO") {
-      instruction +=
-        "\nSESGO EARNINGS: Guidance CONTRACTIVO confirmado. Sesga señales hacia MANTENER o REDUCIR " +
-        "salvo soporte técnico de alta convicción (confidenceScore > 70).";
-    } else if (earningsGuidance.sentiment === "EXPANSIVO") {
-      instruction +=
-        "\nSESGO EARNINGS: Guidance EXPANSIVO confirmado. Puedes elevar el confidenceScore en señales COMPRA " +
-        "cuando los indicadores técnicos lo respalden.";
-    }
-  }
-
-  return instruction;
-}
-
-function buildAllHorizonsPrompt(
-  ticker: string,
-  price: number,
-  changePercent: number,
-  indicators: TechnicalIndicators,
-  allFundamentals: AllFundamentals,
-  newsSummary: string,
-  newsSentiment: Sentiment,
-  riskProfile?: string | null,
-  quantMetrics?: PortfolioQuantMetrics | null,
-  fearGreedScore?: number | null
-): string {
-  const m = allFundamentals.medium;
-  const l = allFundamentals.long;
-
-  const riskCtx = riskProfile
-    ? `\nPerfil de riesgo del inversor: ${riskProfile}.`
-    : "";
-
-  const quantCtx = quantMetrics
-    ? `\nMétricas cuantitativas de portafolio (Robo-Advisor): ${formatQuantBlock(quantMetrics)}`
-    : "";
-
-  const fgCtx = fearGreedScore != null
-    ? `\nÍndice Fear & Greed propietario: ${fearGreedScore}/100 (0=extremo miedo, 100=extrema codicia).`
-    : "";
-
-  const highCorrPairs = quantMetrics?.correlatedTickers.filter((c) => Math.abs(c.correlationFactor) > 0.75) ?? [];
-  const diversAlert = highCorrPairs.length > 0
-    ? `\nAlerta de diversificación: ${ticker} tiene correlación >0.75 con ${highCorrPairs.map((c) => c.ticker).join(", ")}.`
-    : "";
-
-  // Macro context and earnings guidance are injected in systemInstruction (see buildDynamicSystemInstruction)
-  // to apply a consistent macro bias across all horizon blocks without inflating the user prompt.
-
-  return `Efectúa un diagnóstico de riesgo multi-horizonte y genera señales algorítmicas para el activo [${ticker}].
-Fecha: ${getTemporalContext()}.${riskCtx}${quantCtx}${fgCtx}${diversAlert}
-
-Datos de mercado:
-- Precio actual: $${price.toFixed(2)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}% hoy)
-- Noticias (48h): ${newsSummary} | Sentimiento: ${newsSentiment}
-
-Indicadores técnicos (Corto Plazo): ${formatTechnicalBlock(indicators)}
-Métricas fundamentales (Medio Plazo): ${formatMediumBlock(m)}
-Métricas de valor (Largo Plazo): ${formatLongBlock(l)}
-
-Genera el siguiente JSON con proyecciones algorítmicas por horizonte:
-{
-  "shortTerm": {
-    "analysisText": "3-4 oraciones. Prioriza RSI, Fear&Greed, volatilidad y noticias.",
-    "scenarioLabel": "Positivo|Neutral|Negativo",
-    "scenarioJustification": "Una oración para el corto plazo.",
-    "divergenceAlert": true|false,
-    "horizonMatch": "Encaje del activo para trading de corto plazo.",
-    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
-    "portfolioAlert": "Riesgo de diversificación vs resto de cartera. Cadena vacía si no hay riesgo.",
-    "prescriptiveAction": {
-      "action": "COMPRA|VENTA|MANTENER|REDUCIR",
-      "confidenceScore": 0-100,
-      "executionPriceLimit": precio_técnico_de_referencia,
-      "quantitativeJustification": "1-2 oraciones basadas en indicadores técnicos y Fear&Greed.",
-      "estimatedHorizonDays": 5-30
-    }
+// ── Static horizon-output schema (goes in user message, NOT systemInstruction) ─
+// Defined once so JSON.stringify produces identical bytes every call.
+const HORIZON_FIELDS_SCHEMA = {
+  analysisText:          "string: 3-4 oraciones",
+  scenarioLabel:         "Positivo|Neutral|Negativo",
+  scenarioJustification: "string: 1 oración",
+  divergenceAlert:       "boolean",
+  horizonMatch:          "string",
+  keyMetrics:            ["string", "string", "string"],
+  portfolioAlert:        "string: riesgo de diversificación o cadena vacía",
+  prescriptiveAction: {
+    action:                    "COMPRA|VENTA|MANTENER|REDUCIR",
+    confidenceScore:           "integer: 0-100",
+    executionPriceLimit:       "number: nivel técnico USD",
+    quantitativeJustification: "string: 1-2 oraciones",
+    estimatedHorizonDays:      "integer",
   },
-  "mediumTerm": {
-    "analysisText": "3-4 oraciones. Prioriza Sharpe, crecimiento operativo y correlaciones.",
-    "scenarioLabel": "Positivo|Neutral|Negativo",
-    "scenarioJustification": "Una oración para el medio plazo.",
-    "divergenceAlert": true|false,
-    "horizonMatch": "Encaje del activo para inversión de medio plazo.",
-    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
-    "portfolioAlert": "Riesgo de diversificación vs resto de cartera. Cadena vacía si no hay riesgo.",
-    "prescriptiveAction": {
-      "action": "COMPRA|VENTA|MANTENER|REDUCIR",
-      "confidenceScore": 0-100,
-      "executionPriceLimit": precio_técnico_de_referencia,
-      "quantitativeJustification": "1-2 oraciones basadas en fundamentales y Sharpe.",
-      "estimatedHorizonDays": 90-365
-    }
-  },
-  "longTerm": {
-    "analysisText": "3-4 oraciones. Prioriza FCF, moat, dividendos y Sharpe anualizado.",
-    "scenarioLabel": "Positivo|Neutral|Negativo",
-    "scenarioJustification": "Una oración para el largo plazo.",
-    "divergenceAlert": true|false,
-    "horizonMatch": "Encaje del activo para inversión de largo plazo.",
-    "keyMetrics": ["métrica 1", "métrica 2", "métrica 3"],
-    "portfolioAlert": "Riesgo de diversificación vs resto de cartera. Cadena vacía si no hay riesgo.",
-    "prescriptiveAction": {
-      "action": "COMPRA|VENTA|MANTENER|REDUCIR",
-      "confidenceScore": 0-100,
-      "executionPriceLimit": precio_técnico_de_referencia,
-      "quantitativeJustification": "1-2 oraciones basadas en valor intrínseco y FCF.",
-      "estimatedHorizonDays": 365-1825
-    }
-  }
-}
-
-divergenceAlert: true si técnicos y sentimiento apuntan en direcciones opuestas.
-confidenceScore: 0-100 basado en la convergencia de señales cuantitativas. Nunca inventes datos.
-executionPriceLimit: nivel técnico de soporte/resistencia relevante en USD (usa SMA, Fibonacci o niveles de precio).`;
-}
+} as const;
 
 // ── Zod schemas — strict validation of Gemini JSON output ────────────────────
 // .catch() on each field means a bad value degrades gracefully to the fallback
@@ -483,16 +325,39 @@ export async function generateAllHorizonsAnalysis(
   macroContext?: MacroGlobalContext | null,
   earningsGuidance?: EarningsGuidanceInsight | null
 ): Promise<AllHorizonsAIAnalysis> {
-  const prompt = buildAllHorizonsPrompt(
-    ticker, price, changePercent, indicators,
-    allFundamentals, newsAnalysis.summary, newsAnalysis.sentiment,
-    riskProfile, quantMetrics, fearGreedScore
-  );
+  const { medium: m, long: l } = allFundamentals;
 
-  const systemInstruction = buildDynamicSystemInstruction(macroContext, earningsGuidance);
+  // Dynamic context moves to the user message — systemInstruction stays static.
+  const ctx = {
+    date:     getTemporalContext(),
+    macro:    (macroContext?.items ?? []).map((i) => ({ title: i.title, impact: i.impactLevel, sectors: i.affectedSectors })),
+    earnings: earningsGuidance
+      ? { [ticker]: { q: earningsGuidance.fiscalQuarter, sentiment: earningsGuidance.sentiment, revenueYoY: earningsGuidance.revenueGuidanceYoY, eps: earningsGuidance.epsGuidanceStatus } }
+      : {},
+    risk: riskProfile ?? null,
+  };
+
+  const stock = {
+    ticker, price, chg: changePercent,
+    tech:  { rsi14: indicators.rsi14, sma20: indicators.sma20, sma50: indicators.sma50, atr14: indicators.atr14, relVol: indicators.relVolume },
+    fund:  { peg: m.pegRatio, fwdEps: m.forwardEps, revGrowth: m.revenueGrowthYoY, roe: m.returnOnEquity, de: m.debtToEquity, pe: l.trailingPE, divYield: l.dividendYield, margin: l.profitMargin, fcfYield: l.freeCashflowYield, beta: l.beta },
+    news:  { summary: newsAnalysis.summary, sentiment: newsAnalysis.sentiment },
+    fg:    fearGreedScore ?? null,
+    quant: quantMetrics ? { sharpe: quantMetrics.sharpeRatio, kelly: quantMetrics.kellyFraction, weight: quantMetrics.portfolioWeight, corr: quantMetrics.correlatedTickers } : null,
+    degraded: false,
+  };
+
+  const schema = {
+    mode:         "direct" as const,
+    tickers:      [ticker],
+    horizons:     ["shortTerm", "mediumTerm", "longTerm"],
+    horizonFields: HORIZON_FIELDS_SCHEMA,
+  };
+
+  const prompt = JSON.stringify({ ctx, stocks: [stock], schema });
 
   const raw = await geminiChat(prompt, 2000, 3, {
-    systemInstruction,
+    systemInstruction: STATIC_SYSTEM_INSTRUCTION,
     jsonMode: true,
   });
 
@@ -540,59 +405,88 @@ const FALLBACK_ALL: AllHorizonsAIAnalysis = {
   longTerm: FALLBACK_HORIZON,
 };
 
-function formatStockDataBlock(input: BatchStockInput): string {
-  const { ticker, price, changePercent, indicators, newsAnalysis, allFundamentals, quantMetrics, fearGreedScore, earningsGuidance } = input;
-  const sign = changePercent >= 0 ? "+" : "";
-  const lines: string[] = [
-    `[${ticker}] $${price.toFixed(2)} (${sign}${changePercent.toFixed(2)}%)`,
-    `  Técnicos: ${formatTechnicalBlock(indicators)}`,
-    `  Medio: ${formatMediumBlock(allFundamentals.medium)}`,
-    `  Largo: ${formatLongBlock(allFundamentals.long)}`,
-    `  Noticias: ${newsAnalysis.summary} | Sentimiento: ${newsAnalysis.sentiment}`,
-  ];
-  if (fearGreedScore != null) {
-    lines.push(`  Fear&Greed: ${fearGreedScore}/100`);
-  }
-  if (quantMetrics) {
-    lines.push(`  Sharpe: ${quantMetrics.sharpeRatio} | Kelly: ${quantMetrics.kellyFraction} | Peso: ${quantMetrics.portfolioWeight}%`);
-  }
-  if (earningsGuidance) {
-    const rev = earningsGuidance.revenueGuidanceYoY != null ? `${earningsGuidance.revenueGuidanceYoY}% YoY` : "N/D";
-    lines.push(`  Guidance (${earningsGuidance.fiscalQuarter}): ${earningsGuidance.sentiment} | Revenue: ${rev} | EPS: ${earningsGuidance.epsGuidanceStatus}`);
-  }
-  if (input.dataQuality?.degraded) {
-    const missing = [
-      !input.dataQuality.technical    && "indicadores técnicos",
-      !input.dataQuality.fundamentals && "fundamentales",
-      !input.dataQuality.news         && "noticias",
-    ].filter(Boolean).join(", ");
-    if (missing) {
-      lines.push(`  DATOS PARCIALES: ${missing} no disponibles — reduce confidenceScore para este activo e infiere con mayor cautela.`);
-    }
-  }
-  return lines.join("\n");
-}
+/**
+ * Builds the JSON-structured user message for a batch of stocks.
+ *
+ * Dynamic context (macro, earnings, riskProfile) is serialized as compact JSON
+ * in ctx so systemInstruction can remain static across all calls, enabling
+ * Gemini's implicit KV prefix cache on the system prompt.
+ *
+ * Output schema is included in the user message (not systemInstruction) so
+ * Gemini validates its output against the spec on each call.
+ */
+function buildBatchPrompt(
+  inputs: BatchStockInput[],
+  macroContext?: MacroGlobalContext | null
+): string {
+  const riskProfile = inputs[0]?.riskProfile ?? null;
 
-function buildBatchPrompt(inputs: BatchStockInput[]): string {
-  const dataBlocks = inputs.map(formatStockDataBlock).join("\n\n");
-  const tickerKeys = inputs.map((i) => `"${i.ticker}": { "shortTerm": {...}, "mediumTerm": {...}, "longTerm": {...} }`).join(",\n  ");
+  const ctx = {
+    date: getTemporalContext(),
+    macro: (macroContext?.items ?? []).map((item) => ({
+      title:   item.title,
+      impact:  item.impactLevel,
+      sectors: item.affectedSectors,
+    })),
+    earnings: Object.fromEntries(
+      inputs
+        .filter((inp) => inp.earningsGuidance)
+        .map((inp) => {
+          const eg = inp.earningsGuidance!;
+          return [inp.ticker, {
+            q:          eg.fiscalQuarter,
+            sentiment:  eg.sentiment,
+            revenueYoY: eg.revenueGuidanceYoY,
+            eps:        eg.epsGuidanceStatus,
+          }];
+        })
+    ),
+    risk: riskProfile,
+  };
 
-  return `Efectúa un diagnóstico de riesgo multi-horizonte para los siguientes activos.
-Fecha: ${getTemporalContext()}.
+  const stocks = inputs.map((inp) => {
+    const { medium: m, long: l } = inp.allFundamentals;
+    const qm = inp.quantMetrics;
+    return {
+      ticker:   inp.ticker,
+      price:    inp.price,
+      chg:      inp.changePercent,
+      tech: {
+        rsi14:  inp.indicators.rsi14,
+        sma20:  inp.indicators.sma20,
+        sma50:  inp.indicators.sma50,
+        atr14:  inp.indicators.atr14,
+        relVol: inp.indicators.relVolume,
+      },
+      fund: {
+        peg:       m.pegRatio,
+        fwdEps:    m.forwardEps,
+        revGrowth: m.revenueGrowthYoY,
+        roe:       m.returnOnEquity,
+        de:        m.debtToEquity,
+        pe:        l.trailingPE,
+        divYield:  l.dividendYield,
+        margin:    l.profitMargin,
+        fcfYield:  l.freeCashflowYield,
+        beta:      l.beta,
+      },
+      news:     { summary: inp.newsAnalysis.summary, sentiment: inp.newsAnalysis.sentiment },
+      fg:       inp.fearGreedScore ?? null,
+      quant:    qm ? { sharpe: qm.sharpeRatio, kelly: qm.kellyFraction, weight: qm.portfolioWeight, corr: qm.correlatedTickers } : null,
+      degraded: inp.dataQuality?.degraded ?? false,
+    };
+  });
 
-${dataBlocks}
+  // Schema is in the user message (not systemInstruction) so it stays cacheable
+  // alongside the static system prompt and is validated on every call.
+  const schema = {
+    mode:         "keyed" as const,
+    tickers:      inputs.map((i) => i.ticker),
+    horizons:     ["shortTerm", "mediumTerm", "longTerm"],
+    horizonFields: HORIZON_FIELDS_SCHEMA,
+  };
 
-Genera el siguiente JSON con proyecciones algorítmicas por horizonte para CADA activo.
-El esquema de cada bloque es idéntico al estándar (analysisText, scenarioLabel, scenarioJustification, divergenceAlert, horizonMatch, keyMetrics, portfolioAlert, prescriptiveAction).
-
-{
-  ${tickerKeys}
-}
-
-prescriptiveAction.action: "COMPRA|VENTA|MANTENER|REDUCIR"
-prescriptiveAction.confidenceScore: 0-100
-prescriptiveAction.executionPriceLimit: nivel técnico en USD
-prescriptiveAction.estimatedHorizonDays: días estimados del horizonte`;
+  return JSON.stringify({ ctx, stocks, schema });
 }
 
 /**
@@ -608,19 +502,16 @@ export async function batchGenerateAllHorizons(
 ): Promise<Map<string, AllHorizonsAIAnalysis>> {
   const resultMap = new Map<string, AllHorizonsAIAnalysis>();
 
-  // Build system instruction once — shared across all batch groups
-  // earningsGuidance varies per ticker so it goes in the user prompt data block (formatStockDataBlock)
-  const systemInstruction = buildDynamicSystemInstruction(macroContext, null);
-
-  // Split into groups of BATCH_SIZE
+  // STATIC_SYSTEM_INSTRUCTION never changes → Gemini can implicitly cache it.
+  // Dynamic context (macro, earnings, risk) is in the user message via buildBatchPrompt.
   for (let i = 0; i < inputs.length; i += BATCH_SIZE) {
     const group = inputs.slice(i, i + BATCH_SIZE);
     const tickers = group.map((g) => g.ticker);
 
     try {
-      const prompt = buildBatchPrompt(group);
+      const prompt = buildBatchPrompt(group, macroContext);
       const raw = await geminiChat(prompt, 2000 * group.length, 2, {
-        systemInstruction,
+        systemInstruction: STATIC_SYSTEM_INSTRUCTION,
         jsonMode: true,
       });
 
