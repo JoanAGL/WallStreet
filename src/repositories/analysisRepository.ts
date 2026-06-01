@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { StockAnalysisModel } from "@/types/models";
+import type { PriceRsiDivergence } from "@/services/technicalAnalysisService";
 
 export interface UpsertAnalysisData {
   stockId: string;
@@ -13,7 +14,7 @@ export interface UpsertAnalysisData {
   analysisText: string;
   scenarioLabel: string;
   scenarioJustification: string;
-  divergenceAlert: boolean;
+  divergenceAlert: PriceRsiDivergence | null;
   horizonMatch: string | null;
   keyMetrics: string | null;
   metricsData: string | null;

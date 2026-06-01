@@ -81,7 +81,7 @@ model StockAnalysis {
   analysisText          String
   scenarioLabel         String
   scenarioJustification String
-  divergenceAlert       Boolean  @default(false)
+  divergenceAlert       Json?
   horizonMatch          String?
   keyMetrics            String?
   metricsData           String?

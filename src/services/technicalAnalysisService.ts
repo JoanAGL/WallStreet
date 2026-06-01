@@ -1,3 +1,18 @@
+export type DivergenceType =
+  | 'REGULAR_BEARISH'
+  | 'REGULAR_BULLISH'
+  | 'HIDDEN_BEARISH'
+  | 'HIDDEN_BULLISH'
+  | 'NONE'
+
+export type DivergenceStrength = 'WEAK' | 'MODERATE' | 'STRONG'
+
+export interface PriceRsiDivergence {
+  type: DivergenceType
+  strength: DivergenceStrength
+  description: string
+}
+
 export function calculateSMA(closes: number[], period: number): number | null {
   if (closes.length < period) return null;
   const slice = closes.slice(0, period);
@@ -25,6 +40,72 @@ export function calculateRSI(closes: number[], period = 14): number | null {
 
   const rs = avgGain / avgLoss;
   return parseFloat((100 - 100 / (1 + rs)).toFixed(2));
+}
+
+// Returns one RSI value per position in closes (index-aligned, most-recent-first).
+// series[0] = RSI for closes[0], series[k] = RSI computed using closes[k..k+period].
+export function calculateRSISeries(closes: number[], period = 14): number[] {
+  const series: number[] = [];
+  for (let i = 0; i + period < closes.length; i++) {
+    const rsi = calculateRSI(closes.slice(i), period);
+    series.push(rsi ?? 50);
+  }
+  return series;
+}
+
+// Splits [0..lookback-1] into two halves. Compares max/min of price and RSI between
+// the newer half (indices 0..half-1) and older half (indices half..lookback-1).
+export function detectPriceRsiDivergence(
+  closePrices: number[],
+  rsiSeries: number[],
+  lookback = 14
+): PriceRsiDivergence {
+  const len = Math.min(closePrices.length, rsiSeries.length, lookback);
+  if (len < 4) return { type: 'NONE', strength: 'WEAK', description: 'Datos insuficientes para detectar divergencia.' };
+
+  const half = Math.floor(len / 2);
+  const newerPrices = closePrices.slice(0, half);
+  const newerRsi    = rsiSeries.slice(0, half);
+  const olderPrices = closePrices.slice(half, len);
+  const olderRsi    = rsiSeries.slice(half, len);
+
+  const maxNP = Math.max(...newerPrices), minNP = Math.min(...newerPrices);
+  const maxOP = Math.max(...olderPrices), minOP = Math.min(...olderPrices);
+  const maxNR = Math.max(...newerRsi),    minNR = Math.min(...newerRsi);
+  const maxOR = Math.max(...olderRsi),    minOR = Math.min(...olderRsi);
+
+  let type: DivergenceType = 'NONE';
+  let priceDelta = 0;
+  let rsiDelta   = 0;
+
+  if (maxNP > maxOP && maxNR < maxOR) {
+    type = 'REGULAR_BEARISH';
+    priceDelta = ((maxNP - maxOP) / maxOP) * 100;
+    rsiDelta   = maxOR - maxNR;
+  } else if (minNP < minOP && minNR > minOR) {
+    type = 'REGULAR_BULLISH';
+    priceDelta = ((minOP - minNP) / minOP) * 100;
+    rsiDelta   = minNR - minOR;
+  } else if (maxNP < maxOP && maxNR > maxOR) {
+    type = 'HIDDEN_BEARISH';
+    priceDelta = ((maxOP - maxNP) / maxOP) * 100;
+    rsiDelta   = maxNR - maxOR;
+  } else if (minNP > minOP && minNR < minOR) {
+    type = 'HIDDEN_BULLISH';
+    priceDelta = ((minNP - minOP) / minOP) * 100;
+    rsiDelta   = minOR - minNR;
+  }
+
+  if (type === 'NONE') return { type: 'NONE', strength: 'WEAK', description: 'Sin divergencia precio/RSI detectada.' };
+
+  const strength: DivergenceStrength = rsiDelta > 10 ? 'STRONG' : rsiDelta > 5 ? 'MODERATE' : 'WEAK';
+
+  const isBearish = type === 'REGULAR_BEARISH' || type === 'HIDDEN_BEARISH';
+  const priceSign = isBearish ? '+' : '-';
+  const rsiSign   = isBearish ? '-' : '+';
+  const description = `Precio ${priceSign}${priceDelta.toFixed(1)}% pero RSI ${rsiSign}${rsiDelta.toFixed(0)}pts en ${lookback} días`;
+
+  return { type, strength, description };
 }
 
 /**
@@ -195,6 +276,8 @@ export interface TechnicalIndicators {
   marketRegime: MarketRegime;
   /** Volume-Price divergence Z-score. |Z|>2.5 signals an anomaly. */
   volumePriceDivergenceZ: number | null;
+  /** Classic price/RSI divergence over the last ~14 bars. null = no divergence or insufficient data. */
+  priceRsiDivergence: PriceRsiDivergence | null;
   calculatedAt: string;
 }
 
@@ -206,11 +289,13 @@ export function calculateIndicators(
   volumes: number[] = []
 ): TechnicalIndicators {
   const hurstExponent = calculateHurstExponent(closes);
+  const rsiSeries     = calculateRSISeries(closes, 14);
+  const rawDivergence = closes.length >= 20 ? detectPriceRsiDivergence(closes, rsiSeries) : null;
   return {
     ticker,
     sma20:     calculateSMA(closes, 20),
     sma50:     calculateSMA(closes, 50),
-    rsi14:     calculateRSI(closes, 14),
+    rsi14:     rsiSeries[0] ?? null,
     atr14:     highs.length >= 15 ? calculateATR(closes, highs, lows, 14) : null,
     relVolume: volumes.length >= 21 ? calculateRelativeVolume(volumes, 20) : null,
     hurstExponent,
@@ -219,6 +304,7 @@ export function calculateIndicators(
       closes.length >= 21 && volumes.length >= 21
         ? calculateVolumePriceDivergence(closes, volumes)
         : null,
+    priceRsiDivergence: rawDivergence?.type !== 'NONE' ? rawDivergence : null,
     calculatedAt: new Date().toISOString(),
   };
 }

@@ -1,5 +1,5 @@
 import { geminiChat } from "@/lib/geminiClient";
-import type { InvestmentHorizon } from "@/types/models";
+import type { InvestmentHorizon, PriceRsiDivergence } from "@/types/models";
 import { HORIZON_LABELS } from "@/types/models";
 
 export interface PortfolioStockInput {
@@ -9,7 +9,7 @@ export interface PortfolioStockInput {
   investmentHorizon: InvestmentHorizon;
   scenarioLabel: "Positivo" | "Neutral" | "Negativo";
   scenarioJustification: string;
-  divergenceAlert: boolean;
+  divergenceAlert: PriceRsiDivergence | null;
   newsSentiment: string;
   keyMetrics: string[];
   // Optional position data
@@ -69,7 +69,7 @@ export async function generatePortfolioAnalysis(
       return (
         `• ${s.ticker} | $${s.price.toFixed(2)} (${s.changePercent >= 0 ? "+" : ""}${s.changePercent.toFixed(2)}% hoy) | Horizonte: ${HORIZON_LABELS[s.investmentHorizon]}\n` +
         `  Escenario: ${s.scenarioLabel} — ${s.scenarioJustification}\n` +
-        `  Sentimiento noticias: ${s.newsSentiment} | Divergencia técnico-fundamental: ${s.divergenceAlert ? "Sí ⚠" : "No"}\n` +
+        `  Sentimiento noticias: ${s.newsSentiment} | Divergencia precio/RSI: ${s.divergenceAlert ? `Sí (${s.divergenceAlert.type}) ⚠` : "No"}\n` +
         `  Métricas clave: ${s.keyMetrics.join(", ") || "N/D"}` +
         (positionLine ? `\n${positionLine}` : "")
       );

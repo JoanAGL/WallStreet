@@ -215,11 +215,35 @@ function MonteCarloSection() {
             ))}
           </div>
 
-          {/* Metrics */}
+          {/* Risk metrics */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white border border-gray-200 rounded-xl p-3">
+              <p className="text-xs text-gray-500">VaR 95% (pérdida máx. probable)</p>
+              <p className="text-base font-bold text-red-600 mt-1">
+                {result.var95 >= 0 ? "-" : "+"}{Math.abs(result.var95).toLocaleString("es-ES", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-xs text-gray-400 mt-1 leading-tight">
+                Calculado con distribución t de Student (df=5) para capturar eventos de cola.
+                Más conservador que el modelo normal estándar.
+              </p>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-xl p-3">
+              <p className="text-xs text-gray-500">CVaR 95% (pérdida esperada en peor 5%)</p>
+              <p className="text-base font-bold text-red-700 mt-1">
+                {result.cvar95 >= 0 ? "-" : "+"}{Math.abs(result.cvar95).toLocaleString("es-ES", { style: "currency", currency: "USD", maximumFractionDigits: 0 })}
+              </p>
+              <p className="text-xs text-gray-400 mt-1 leading-tight">
+                Expected Shortfall: media de pérdidas en el 5% peor de escenarios.
+              </p>
+            </div>
+          </div>
+
+          {/* Stats */}
           <div className="flex flex-wrap gap-4 text-xs text-gray-500">
             <span>Retorno diario medio: <strong className="text-gray-700">{(result.mu * 100).toFixed(3)}%</strong></span>
             <span>Volatilidad diaria: <strong className="text-gray-700">{(result.sigma * 100).toFixed(3)}%</strong></span>
             <span>Volatilidad anualizada: <strong className="text-gray-700">{(result.sigma * Math.sqrt(252) * 100).toFixed(1)}%</strong></span>
+            <span>Prob. pérdida: <strong className="text-gray-700">{(result.probabilityOfLoss * 100).toFixed(1)}%</strong></span>
           </div>
 
           <p className="text-xs text-gray-400 italic border-t border-gray-100 pt-2">

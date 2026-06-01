@@ -1,4 +1,4 @@
-import type { StockWithAnalysis, InvestmentHorizon } from "@/types/models";
+import type { StockWithAnalysis, InvestmentHorizon, PriceRsiDivergence } from "@/types/models";
 import { HORIZON_LABELS } from "@/types/models";
 import type { HorizonAnalysis, AllHorizonsAIAnalysis } from "@/services/aiAnalysisService";
 import { calculateRiskLevel } from "@/lib/riskCalculator";
@@ -25,6 +25,21 @@ const ACTION_STYLES: Record<string, { badge: string; bar: string; label: string 
   REDUCIR:  { badge: "bg-amber-500 text-white",     bar: "bg-amber-500",    label: "REDUCIR" },
   MANTENER: { badge: "bg-gray-400 text-white",      bar: "bg-gray-400",     label: "MANTENER" },
 };
+
+const DIVERGENCE_BADGE: Record<string, string> = {
+  REGULAR_BEARISH: "bg-red-100 text-red-700 border-red-200",
+  HIDDEN_BEARISH:  "bg-red-100 text-red-700 border-red-200",
+  REGULAR_BULLISH: "bg-green-100 text-green-700 border-green-200",
+  HIDDEN_BULLISH:  "bg-green-100 text-green-700 border-green-200",
+};
+
+function parsePriceRsiDivergence(raw: unknown): PriceRsiDivergence | null {
+  if (!raw || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  if (typeof d.type !== "string" || typeof d.strength !== "string" || typeof d.description !== "string") return null;
+  if (d.type === "NONE") return null;
+  return d as unknown as PriceRsiDivergence;
+}
 
 const AI_UNAVAILABLE_JUSTIFICATION = "El análisis automático no está disponible en este momento.";
 
@@ -131,7 +146,8 @@ export default function StockCard({ stock }: Props) {
   const displayScenarioLabel    = (horizonAI?.scenarioLabel    ?? a?.scenarioLabel    ?? "Neutral") as "Positivo" | "Neutral" | "Negativo";
   const displayScenarioJust     = horizonAI?.scenarioJustification ?? a?.scenarioJustification ?? "";
   const displayAnalysisText     = horizonAI?.analysisText          ?? a?.analysisText          ?? "";
-  const displayDivergenceAlert  = horizonAI?.divergenceAlert       ?? a?.divergenceAlert       ?? false;
+  const displayDivergenceAlert  = horizonAI?.divergenceAlert ?? false;
+  const priceRsiDivergence      = parsePriceRsiDivergence(a?.divergenceAlert);
   const displayHorizonMatch     = horizonAI?.horizonMatch          ?? a?.horizonMatch          ?? "";
   const displayKeyMetrics: string[] = horizonAI?.keyMetrics
     ?? (() => { try { return a?.keyMetrics ? JSON.parse(a.keyMetrics) as string[] : []; } catch { return []; } })();
@@ -261,7 +277,7 @@ export default function StockCard({ stock }: Props) {
             </div>
           ) : (
             <>
-              {/* Alerta de divergencia */}
+              {/* Alerta de divergencia técnico-sentimiento (IA) */}
               {displayDivergenceAlert && (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                   <span className="mt-0.5 shrink-0">⚠</span>
@@ -269,6 +285,17 @@ export default function StockCard({ stock }: Props) {
                     <span className="font-semibold">Divergencia técnico-fundamental detectada.</span>{" "}
                     Los indicadores técnicos y el sentimiento noticioso apuntan en direcciones opuestas.
                   </span>
+                </div>
+              )}
+
+              {/* Badge de divergencia clásica precio/RSI */}
+              {priceRsiDivergence && (
+                <div
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${DIVERGENCE_BADGE[priceRsiDivergence.type] ?? ""}`}
+                  title={priceRsiDivergence.description}
+                >
+                  <span>{priceRsiDivergence.type.replace(/_/g, " ")}</span>
+                  <span className="opacity-60">· {priceRsiDivergence.strength}</span>
                 </div>
               )}
 

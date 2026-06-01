@@ -3,7 +3,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getStocksWithAnalysis } from "@/repositories/stockRepository";
 import { getHistoricalCloses } from "@/services/marketDataService";
-import { runMonteCarlo, runStressTests } from "@/lib/portfolioMath";
+import { runMonteCarlo } from "@/lib/math/simulation/monteCarlo";
+import { runStressTests } from "@/lib/math/simulation/stressTest";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,8 @@ export async function POST(req: NextRequest) {
     horizon?: number;
     monthlyContribution?: number;
     portfolioValue?: number;
+    distribution?: 'NORMAL' | 'STUDENT_T';
+    degreesOfFreedom?: number;
   };
 
   const horizonYears = body.horizon ?? 1;
@@ -73,7 +76,7 @@ export async function POST(req: NextRequest) {
   if (S0 <= 0) S0 = 10000;
 
   const [monteCarlo, stressTests] = await Promise.all([
-    Promise.resolve(runMonteCarlo(mu, sigma, S0, tradingDays, monthlyContribution, 1000)),
+    Promise.resolve(runMonteCarlo(mu, sigma, S0, tradingDays, monthlyContribution, 1000, body.distribution, body.degreesOfFreedom)),
     Promise.resolve(runStressTests(S0, mu * 252)),
   ]);
 

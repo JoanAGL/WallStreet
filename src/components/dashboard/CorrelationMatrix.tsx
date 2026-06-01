@@ -51,7 +51,7 @@ export default function CorrelationMatrix() {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="text-xs border-collapse w-full">
+        <table className="text-xs border-collapse min-w-max">
           <thead>
             <tr>
               <th className="p-1.5 text-left text-gray-400 font-normal w-12" />

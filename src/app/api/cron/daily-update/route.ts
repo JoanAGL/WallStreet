@@ -1,3 +1,6 @@
+// WARNING: With 20 stocks per user and multiple users, this route can run for
+// several minutes. Requires Vercel Pro (300s max duration) or higher.
+// On Vercel Hobby (10s limit) this will time out with more than ~2 stocks total.
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runAnalysisForStocks } from "@/services/analysisOrchestrator";

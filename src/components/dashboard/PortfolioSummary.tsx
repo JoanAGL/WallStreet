@@ -61,12 +61,21 @@ export default function PortfolioSummary({ stocks }: Props) {
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
           Resumen de cartera
         </p>
-        <Link
-          href="/dashboard/simulation"
-          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-        >
-          Monte Carlo &amp; Optimización →
-        </Link>
+        <div className="flex items-center gap-3">
+          <a
+            href="/api/portfolio/export?format=csv"
+            download
+            className="text-xs text-gray-500 hover:text-gray-700 font-medium"
+          >
+            ↓ CSV
+          </a>
+          <Link
+            href="/dashboard/simulation"
+            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+          >
+            Monte Carlo &amp; Optimización →
+          </Link>
+        </div>
       </div>
 
       {/* Scenario distribution + daily change */}

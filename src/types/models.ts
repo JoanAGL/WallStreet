@@ -5,6 +5,8 @@
 
 export type InvestmentHorizon = "SHORT_TERM" | "MEDIUM_TERM" | "LONG_TERM";
 
+export type { PriceRsiDivergence } from "@/services/technicalAnalysisService";
+
 // ── Señales algorítmicas (proyecciones cuantitativas, no asesoramiento financiero) ──
 
 export type TradingAction = "COMPRA" | "VENTA" | "MANTENER" | "REDUCIR";
@@ -37,7 +39,7 @@ export interface StockAnalysisModel {
   analysisText: string;
   scenarioLabel: string;
   scenarioJustification: string;
-  divergenceAlert: boolean;
+  divergenceAlert: PriceRsiDivergence | null;
   horizonMatch: string | null;
   keyMetrics: string | null;   // JSON string[]
   metricsData: string | null;  // JSON object with horizon-specific metrics

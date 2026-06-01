@@ -31,6 +31,13 @@ import type { UpdateType } from "@/types/updateTypes";
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 
 // ── Per-service timeout budgets (ms) ─────────────────────────────────────────
+// Vercel Pro budget (300s) for 20-stock worst case (batch size 4 → 5 Gemini calls):
+//   market data parallel: max(quote 3s, historical 8s, fundamentals 6s) ≈ 8s
+//   macro + news batch parallel:                                          ≈ 12s
+//   sentiment + earnings parallel:                                        ≈ 10s
+//   Gemini batch (5 calls × 25s each, sequential within batch engine):   ≈ 125s
+//   portfolio AI:                                                         ≈ 30s
+//   Total worst-case estimate: ~185s — well within the 300s Pro limit.
 const TIMEOUTS = {
   quote:            3_000,   // Finnhub real-time quote
   historical:       8_000,   // Yahoo Finance candlestick data
@@ -461,7 +468,7 @@ async function runFullAnalysis(
         analysisText: active.analysisText,
         scenarioLabel: active.scenarioLabel,
         scenarioJustification: active.scenarioJustification,
-        divergenceAlert: active.divergenceAlert,
+        divergenceAlert: indicators.priceRsiDivergence ?? null,
         horizonMatch: active.horizonMatch,
         keyMetrics: JSON.stringify(active.keyMetrics),
         metricsData: JSON.stringify(metricsData),

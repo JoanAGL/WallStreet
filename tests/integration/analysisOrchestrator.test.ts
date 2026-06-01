@@ -193,7 +193,7 @@ function setupMocks() {
     analysisText: MOCK_ALL_HORIZONS_RESPONSE.shortTerm.analysisText,
     scenarioLabel: "Positivo",
     scenarioJustification: MOCK_ALL_HORIZONS_RESPONSE.shortTerm.scenarioJustification,
-    divergenceAlert: false,
+    divergenceAlert: null,
     horizonMatch: MOCK_ALL_HORIZONS_RESPONSE.shortTerm.horizonMatch,
     keyMetrics: JSON.stringify(MOCK_ALL_HORIZONS_RESPONSE.shortTerm.keyMetrics),
     metricsData: null,
@@ -234,7 +234,7 @@ describe("runAnalysisForStocks — pipeline integration", () => {
     expect(analysis.changePercent).toBe(MOCK_CHANGE_PCT);
     expect(analysis.newsSentiment).toMatch(/^(Positivo|Neutral|Negativo)$/);
     expect(analysis.scenarioLabel).toMatch(/^(Positivo|Neutral|Negativo)$/);
-    expect(typeof analysis.divergenceAlert).toBe("boolean");
+    expect(analysis.divergenceAlert === null || typeof analysis.divergenceAlert === "object").toBe(true);
   });
 
   it("allHorizons JSON parses to valid AllHorizonsAIAnalysis shape", async () => {
@@ -323,7 +323,7 @@ describe("runAnalysisForStocks — pipeline integration", () => {
       analysisText: "cached",
       scenarioLabel: "Neutral",
       scenarioJustification: "cached",
-      divergenceAlert: false,
+      divergenceAlert: null,
       horizonMatch: null, keyMetrics: null, metricsData: null, allHorizons: null,
       generatedAt: new Date(),
       updatedAt: new Date(), // just updated → fresh

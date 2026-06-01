@@ -41,7 +41,7 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Mis acciones</h1>
           <p className="text-sm text-gray-500">
-            {stocks.length} / 10 acciones añadidas
+            {stocks.length} / 20 acciones añadidas
           </p>
         </div>
         <UpdateButton lastUpdatedAt={lastUpdatedAt} />
@@ -76,7 +76,7 @@ export default async function DashboardPage() {
         <div className="text-center py-16 text-gray-400">
           <p className="text-4xl mb-3">📈</p>
           <p className="text-sm">
-            No tienes acciones añadidas. Añade hasta 10 para ver el análisis.
+            No tienes acciones añadidas. Añade hasta 20 para ver el análisis.
           </p>
         </div>
       ) : (
