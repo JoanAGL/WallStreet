@@ -9,10 +9,10 @@ interface Props {
   current: InvestmentHorizon;
 }
 
-const OPTIONS: { value: InvestmentHorizon; label: string; short: string }[] = [
-  { value: "SHORT_TERM",  label: "Corto Plazo",  short: "Corto" },
-  { value: "MEDIUM_TERM", label: "Medio Plazo",  short: "Medio" },
-  { value: "LONG_TERM",   label: "Largo Plazo",  short: "Largo" },
+const OPTIONS: { value: InvestmentHorizon; short: string }[] = [
+  { value: "SHORT_TERM",  short: "Corto" },
+  { value: "MEDIUM_TERM", short: "Medio" },
+  { value: "LONG_TERM",   short: "Largo" },
 ];
 
 export default function HorizonSelector({ ticker, current }: Props) {
@@ -23,22 +23,17 @@ export default function HorizonSelector({ ticker, current }: Props) {
   async function handleSelect(value: InvestmentHorizon) {
     if (value === selected || isPending) return;
     setSelected(value);
-
     const res = await fetch(`/api/stocks/${ticker}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ investmentHorizon: value }),
     });
-
-    if (res.ok) {
-      startTransition(() => router.refresh());
-    } else {
-      setSelected(current);
-    }
+    if (res.ok) startTransition(() => router.refresh());
+    else setSelected(current);
   }
 
   return (
-    <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+    <div style={{ display: "flex", gap: 6 }}>
       {OPTIONS.map((opt) => {
         const active = selected === opt.value;
         return (
@@ -46,12 +41,15 @@ export default function HorizonSelector({ ticker, current }: Props) {
             key={opt.value}
             onClick={() => handleSelect(opt.value)}
             disabled={isPending}
-            title={opt.label}
-            className={`px-2.5 py-1 transition-colors ${
-              active
-                ? "bg-blue-600 text-white"
-                : "bg-white text-gray-500 hover:bg-gray-50"
-            } ${isPending ? "opacity-60 cursor-wait" : "cursor-pointer"}`}
+            style={{
+              flex: 1, padding: "6px 4px", fontSize: 12, fontWeight: 500,
+              borderRadius: 7, cursor: isPending ? "wait" : "pointer",
+              border: `1px solid ${active ? "var(--brand-soft)" : "var(--card-border)"}`,
+              background: active ? "rgba(37,99,235,.18)" : "var(--card-inner)",
+              color: active ? "#93C5FD" : "var(--fg-4)",
+              opacity: isPending ? 0.6 : 1,
+              transition: "all .15s",
+            }}
           >
             {opt.short}
           </button>

@@ -3,34 +3,33 @@
 import { useEffect, useState } from "react";
 import type { CorrelationResult } from "@/lib/portfolioMath";
 
-function cellColor(v: number): string {
-  if (v >= 1) return "bg-gray-200 text-gray-600";
-  if (v > 0.75) return "bg-red-200 text-red-900 font-semibold";
-  if (v > 0.4)  return "bg-yellow-100 text-yellow-900";
-  return "bg-green-100 text-green-900";
+function cellStyle(v: number): { background: string; color: string; fontWeight?: number } {
+  if (v >= 1)   return { background: "var(--card-raised)", color: "var(--fg-4)" };
+  if (v > 0.75) return { background: "#FECACA", color: "#991B1B", fontWeight: 600 };
+  if (v > 0.4)  return { background: "#FEF9C3", color: "#854D0E" };
+  return           { background: "#DCFCE7", color: "#166534" };
 }
 
 export default function CorrelationMatrix() {
-  const [data, setData] = useState<CorrelationResult | null>(null);
+  const [data, setData]       = useState<CorrelationResult | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]     = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/portfolio/correlation")
       .then((r) => r.json())
-      .then((d) => {
-        if (d.error) setError(d.error);
-        else setData(d as CorrelationResult);
-      })
+      .then((d) => { if (d.error) setError(d.error); else setData(d as CorrelationResult); })
       .catch(() => setError("Error al calcular la correlación."))
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) {
     return (
-      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Matriz de correlación</p>
-        <div className="h-24 animate-pulse bg-gray-50 rounded-lg" />
+      <div style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)", borderRadius: 12, padding: 16 }}>
+        <p style={{ fontSize: 12, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--fg-5)", marginBottom: 12 }}>
+          Matriz de correlación
+        </p>
+        <div style={{ height: 96, borderRadius: 8, background: "var(--card-inner)", animation: "pulse 2s infinite" }} />
       </div>
     );
   }
@@ -38,52 +37,68 @@ export default function CorrelationMatrix() {
   if (error || !data || data.tickers.length < 2) return null;
 
   return (
-    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+    <div style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--fg-5)" }}>
           Matriz de correlación
         </p>
-        <div className="flex items-center gap-3 text-xs text-gray-400">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-100 inline-block" /> Baja (&lt;0.4)</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-yellow-100 inline-block" /> Media</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-200 inline-block" /> Alta (&gt;0.75)</span>
+        <div style={{ display: "flex", gap: 12, fontSize: 11, color: "var(--fg-4)" }}>
+          <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: "#DCFCE7", display: "inline-block" }} /> Baja (&lt;0.4)
+          </span>
+          <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: "#FEF9C3", display: "inline-block" }} /> Media
+          </span>
+          <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: "#FECACA", display: "inline-block" }} /> Alta (&gt;0.75)
+          </span>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="text-xs border-collapse min-w-max">
+      {/* Table */}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ borderCollapse: "separate", borderSpacing: 4, fontSize: 12, minWidth: "max-content" }}>
           <thead>
             <tr>
-              <th className="p-1.5 text-left text-gray-400 font-normal w-12" />
+              <th style={{ padding: "4px 6px", width: 40 }} />
               {data.tickers.map((t) => (
-                <th key={t} className="p-1.5 text-center text-gray-600 font-semibold">{t}</th>
+                <th key={t} style={{ padding: "4px 6px", textAlign: "center", fontWeight: 600, color: "var(--fg-4)" }}>{t}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {data.matrix.map((row, i) => (
               <tr key={data.tickers[i]}>
-                <td className="p-1.5 font-semibold text-gray-600">{data.tickers[i]}</td>
-                {row.map((val, j) => (
-                  <td
-                    key={j}
-                    className={`p-1.5 text-center rounded text-xs ${cellColor(val)}`}
-                  >
-                    {val.toFixed(2)}
-                  </td>
-                ))}
+                <td style={{ padding: "4px 6px", fontWeight: 600, color: "var(--fg-4)" }}>{data.tickers[i]}</td>
+                {row.map((val, j) => {
+                  const cs = cellStyle(val);
+                  return (
+                    <td
+                      key={j}
+                      style={{ padding: "6px 8px", textAlign: "center", borderRadius: 5, ...cs }}
+                    >
+                      {val.toFixed(2)}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
+      {/* High-correlation warnings */}
       {data.highPairs.length > 0 && (
-        <div className="flex flex-wrap gap-2 pt-1 border-t border-gray-100">
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, paddingTop: 4, borderTop: "1px solid var(--card-border-inner)" }}>
           {data.highPairs.map((pair) => (
             <span
               key={`${pair.a}-${pair.b}`}
-              className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                padding: "3px 10px", borderRadius: 8, fontSize: 12,
+                background: "var(--neg-bg)", border: "1px solid var(--neg-bd)", color: "#FCA5A5",
+              }}
             >
               ⚠ {pair.a} y {pair.b} correlación {pair.correlation.toFixed(2)} — riesgo de solapamiento, considera diversificar
             </span>

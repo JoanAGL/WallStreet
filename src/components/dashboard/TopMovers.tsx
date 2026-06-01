@@ -19,23 +19,23 @@ export default async function TopMovers() {
   if (gainers.length === 0) return null;
 
   return (
-    <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+    <div style={{ background: "var(--card-bg)", border: "1px solid var(--card-border)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+      <p style={{ margin: 0, fontSize: 12, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--fg-5)" }}>
         Top 5 mayores subidas hoy (S&amp;P 100)
       </p>
-      <ul className="space-y-2">
+      <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 9 }}>
         {gainers.map((g) => (
-          <li key={g.ticker} className="flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <span className="font-semibold text-sm text-gray-900">{g.ticker}</span>
-              <span className="ml-2 text-xs text-gray-500 truncate">{g.name}</span>
-            </div>
-            <div className="flex items-center gap-3 shrink-0">
-              <span className="text-sm text-gray-700">${g.price.toFixed(2)}</span>
-              <span className="text-xs font-semibold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+          <li key={g.ticker} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span>
+              <strong style={{ fontSize: 14, color: "var(--fg-1)" }}>{g.ticker}</strong>
+              <span style={{ fontSize: 12, color: "var(--fg-5)", marginLeft: 8 }}>{g.name}</span>
+            </span>
+            <span style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <span style={{ fontSize: 14, color: "var(--fg-3)" }}>${g.price.toFixed(2)}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#4ADE80", background: "rgba(16,163,74,.12)", border: "1px solid rgba(16,163,74,.35)", padding: "2px 10px", borderRadius: 9999 }}>
                 +{g.changePercent.toFixed(2)}%
               </span>
-            </div>
+            </span>
           </li>
         ))}
       </ul>

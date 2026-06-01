@@ -1,3 +1,4 @@
+import type React from "react";
 import Link from "next/link";
 import type { StockWithAnalysis } from "@/types/models";
 import type { AllHorizonsAIAnalysis } from "@/services/aiAnalysisService";
@@ -50,98 +51,86 @@ export default function PortfolioSummary({ stocks }: Props) {
   const totalPnlPct  = totalPnl != null && totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
   const pnlColor     = totalPnl != null && totalPnl >= 0 ? "text-green-600" : "text-red-600";
 
-  const overallColor =
-    positivo > negativo ? "border-green-200 bg-green-50" :
-    negativo > positivo ? "border-red-200 bg-red-50"     :
-    "border-gray-200 bg-gray-50";
+  const leanPos = positivo > negativo;
+  const leanNeg = negativo > positivo;
+  const containerStyle: React.CSSProperties = {
+    borderRadius: 12,
+    border: `1px solid ${leanPos ? "rgba(16,163,74,.3)" : leanNeg ? "rgba(239,68,68,.3)" : "var(--card-border)"}`,
+    background: leanPos ? "rgba(16,163,74,.07)" : leanNeg ? "rgba(239,68,68,.07)" : "var(--card-bg)",
+    padding: "12px 16px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  };
+
+  const pill = (bg: string, bd: string, fg: string, label: string) => (
+    <span style={{ padding: "3px 11px", borderRadius: 9999, fontSize: 12, fontWeight: 500, border: `1px solid ${bd}`, background: bg, color: fg }}>
+      {label}
+    </span>
+  );
 
   return (
-    <div className={`rounded-xl border px-4 py-3 space-y-2 ${overallColor}`}>
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+    <div style={containerStyle}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--fg-5)" }}>
           Resumen de cartera
         </p>
-        <div className="flex items-center gap-3">
-          <a
-            href="/api/portfolio/export?format=csv"
-            download
-            className="text-xs text-gray-500 hover:text-gray-700 font-medium"
-          >
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <a href="/api/portfolio/export?format=csv" download style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-4)", textDecoration: "none" }}>
             ↓ CSV
           </a>
-          <Link
-            href="/dashboard/portfolio"
-            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-          >
+          <Link href="/dashboard/portfolio" style={{ fontSize: 13, fontWeight: 500, color: "var(--link)", textDecoration: "none" }}>
             Rendimiento →
           </Link>
-          <Link
-            href="/dashboard/history"
-            className="text-xs text-gray-500 hover:text-gray-700 font-medium"
-          >
+          <Link href="/dashboard/history" style={{ fontSize: 13, fontWeight: 500, color: "var(--fg-4)", textDecoration: "none" }}>
             Historial →
           </Link>
-          <Link
-            href="/dashboard/simulation"
-            className="text-xs text-blue-600 hover:text-blue-800 font-medium"
-          >
+          <Link href="/dashboard/simulation" style={{ fontSize: 13, fontWeight: 500, color: "var(--link)", textDecoration: "none" }}>
             Monte Carlo &amp; Optimización →
           </Link>
         </div>
       </div>
 
-      {/* Scenario distribution + daily change */}
-      <div className="flex flex-wrap items-center gap-2">
-        {positivo > 0 && (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-200">
-            {positivo} Positivo{positivo > 1 ? "s" : ""}
-          </span>
-        )}
-        {neutral > 0 && (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-200">
-            {neutral} Neutral{neutral > 1 ? "es" : ""}
-          </span>
-        )}
-        {negativo > 0 && (
-          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 border border-red-200">
-            {negativo} Negativo{negativo > 1 ? "s" : ""}
-          </span>
-        )}
+      {/* Scenario pills + daily change */}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        {positivo > 0 && pill("rgba(16,163,74,.15)", "rgba(16,163,74,.4)", "#4ADE80", `${positivo} Positivo${positivo > 1 ? "s" : ""}`)}
+        {neutral  > 0 && pill("rgba(245,158,11,.15)", "rgba(245,158,11,.4)", "#FBBF24", `${neutral} Neutral${neutral > 1 ? "es" : ""}`)}
+        {negativo > 0 && pill("rgba(239,68,68,.15)", "rgba(239,68,68,.4)", "#F87171", `${negativo} Negativo${negativo > 1 ? "s" : ""}`)}
 
-        <span className="text-xs text-gray-400">·</span>
-        <span className={`text-sm font-semibold ${avgChange >= 0 ? "text-green-600" : "text-red-600"}`}>
+        <span style={{ color: "var(--fg-5)" }}>·</span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: avgChange >= 0 ? "#4ADE80" : "#F87171" }}>
           {avgChange >= 0 ? "+" : ""}{avgChange.toFixed(2)}% hoy
         </span>
 
         {divergencias > 0 && (
           <>
-            <span className="text-xs text-gray-400">·</span>
-            <span className="flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+            <span style={{ color: "var(--fg-5)" }}>·</span>
+            <span style={{ display: "inline-flex", gap: 5, alignItems: "center", fontSize: 12, fontWeight: 500, color: "#FCD34D", background: "rgba(245,158,11,.12)", border: "1px solid rgba(245,158,11,.35)", padding: "3px 11px", borderRadius: 9999 }}>
               ⚠ {divergencias} divergencia{divergencias > 1 ? "s" : ""}
             </span>
           </>
         )}
       </div>
 
-      {/* Aggregate P&L (only when at least 1 position has purchase data) */}
+      {/* Aggregate P&L */}
       {totalPnl != null && (
-        <div className="flex flex-wrap items-center gap-3 pt-1 border-t border-black/5 text-xs">
-          <span className="text-gray-500">
-            Invertido: <span className="font-medium text-gray-700">{fmtMoney(totalCost)}</span>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, paddingTop: 6, borderTop: "1px solid var(--card-border-inner)", fontSize: 12 }}>
+          <span style={{ color: "var(--fg-5)" }}>
+            Invertido: <span style={{ fontWeight: 500, color: "var(--fg-3)" }}>{fmtMoney(totalCost)}</span>
           </span>
-          <span className="text-gray-500">
-            Valor: <span className="font-medium text-gray-700">{fmtMoney(totalValue)}</span>
+          <span style={{ color: "var(--fg-5)" }}>
+            Valor: <span style={{ fontWeight: 500, color: "var(--fg-3)" }}>{fmtMoney(totalValue)}</span>
           </span>
-          <span className={`font-semibold ${pnlColor}`}>
+          <span style={{ fontWeight: 600, color: totalPnl >= 0 ? "#4ADE80" : "#F87171" }}>
             P&L: {totalPnl >= 0 ? "+" : ""}{fmtMoney(totalPnl)}
             {totalPnlPct != null && (
-              <span className="ml-1 font-normal">
+              <span style={{ fontWeight: 400, marginLeft: 4 }}>
                 ({totalPnlPct >= 0 ? "+" : ""}{totalPnlPct.toFixed(2)}%)
               </span>
             )}
           </span>
           {withPosition.length < withAnalysis.length && (
-            <span className="text-gray-400 italic">
+            <span style={{ color: "var(--fg-5)", fontStyle: "italic" }}>
               · {withPosition.length}/{withAnalysis.length} posiciones
             </span>
           )}

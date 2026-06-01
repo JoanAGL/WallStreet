@@ -12,10 +12,44 @@
   --header-border: #2D3748;
 
   /* Cards */
-  --card-bg:       #344059;   /* slightly lighter than background */
-  --card-inner:    #3B4967;   /* nested panels (MetricBox, TxRow) */
+  --card-bg:       #344059;
+  --card-inner:    #3B4967;
+  --card-raised:   #435474;
   --card-border:   #3D506E;
   --card-border-inner: #344060;
+  --input-border:  #3D4E6A;
+
+  /* Foreground ramp */
+  --fg-1: #F1F5F9;
+  --fg-2: #E2E8F0;
+  --fg-3: #CBD5E1;
+  --fg-4: #94A3B8;
+  --fg-5: #7A8BA0;
+
+  /* Brand */
+  --brand:       #2563EB;
+  --brand-hover: #1D4ED8;
+  --brand-soft:  #3B82F6;
+  --link:        #60A5FA;
+
+  /* Semantic signal colors */
+  --pos:         #16A34A;
+  --pos-strong:  #10B981;
+  --neg:         #EF4444;
+  --warn:        #F59E0B;
+  --neutral-clr: #9CA3AF;
+
+  /* Semantic tinted overlays — used via inline styles in components */
+  --pos-bg:   rgba(16, 163, 74, 0.12);
+  --pos-bd:   rgba(16, 163, 74, 0.35);
+  --pos-fill: rgba(16, 163, 74, 0.07);
+  --neg-bg:   rgba(239, 68, 68, 0.12);
+  --neg-bd:   rgba(239, 68, 68, 0.35);
+  --neg-fill: rgba(239, 68, 68, 0.07);
+  --warn-bg:  rgba(245, 158, 11, 0.10);
+  --warn-bd:  rgba(245, 158, 11, 0.30);
+  --info-bg:  rgba(37, 99, 235, 0.12);
+  --info-bd:  rgba(37, 99, 235, 0.35);
 }
 
 body {

@@ -13,10 +13,10 @@ interface Props {
   stock: StockWithAnalysis;
 }
 
-const SENTIMENT_COLORS: Record<string, string> = {
-  Positivo: "text-green-700 bg-green-50 border-green-200",
-  Neutral: "text-yellow-700 bg-yellow-50 border-yellow-200",
-  Negativo: "text-red-700 bg-red-50 border-red-200",
+const SCENARIO_BANNER: Record<string, { bg: string; bd: string; fg: string }> = {
+  Positivo: { bg: "rgba(16,163,74,.12)",  bd: "rgba(16,163,74,.35)",  fg: "#86EFAC" },
+  Neutral:  { bg: "rgba(245,158,11,.10)", bd: "rgba(245,158,11,.30)", fg: "#FCD34D" },
+  Negativo: { bg: "rgba(239,68,68,.10)",  bd: "rgba(239,68,68,.35)",  fg: "#FCA5A5" },
 };
 
 const ACTION_STYLES: Record<string, { badge: string; bar: string; label: string }> = {
@@ -26,11 +26,11 @@ const ACTION_STYLES: Record<string, { badge: string; bar: string; label: string 
   MANTENER: { badge: "bg-gray-400 text-white",      bar: "bg-gray-400",     label: "MANTENER" },
 };
 
-const DIVERGENCE_BADGE: Record<string, string> = {
-  REGULAR_BEARISH: "bg-red-100 text-red-700 border-red-200",
-  HIDDEN_BEARISH:  "bg-red-100 text-red-700 border-red-200",
-  REGULAR_BULLISH: "bg-green-100 text-green-700 border-green-200",
-  HIDDEN_BULLISH:  "bg-green-100 text-green-700 border-green-200",
+const DIVERGENCE_BADGE: Record<string, { bg: string; bd: string; fg: string }> = {
+  REGULAR_BEARISH: { bg: "rgba(239,68,68,.12)",  bd: "rgba(239,68,68,.4)",  fg: "#FCA5A5" },
+  HIDDEN_BEARISH:  { bg: "rgba(239,68,68,.12)",  bd: "rgba(239,68,68,.4)",  fg: "#FCA5A5" },
+  REGULAR_BULLISH: { bg: "rgba(16,163,74,.12)",  bd: "rgba(16,163,74,.4)",  fg: "#86EFAC" },
+  HIDDEN_BULLISH:  { bg: "rgba(16,163,74,.12)",  bd: "rgba(16,163,74,.4)",  fg: "#86EFAC" },
 };
 
 function parsePriceRsiDivergence(raw: unknown): PriceRsiDivergence | null {
@@ -162,8 +162,8 @@ export default function StockCard({ stock }: Props) {
     ? calculateRiskLevel(a.rsi14, displayScenarioLabel, a.newsSentiment)
     : null;
 
-  const changeColor = a && a.changePercent >= 0 ? "text-green-600" : "text-red-600";
-  const sentimentClass = SENTIMENT_COLORS[displayScenarioLabel] ?? SENTIMENT_COLORS["Neutral"];
+  const changeColor    = a && a.changePercent >= 0 ? "#4ADE80" : "#F87171";
+  const scenarioBanner = SCENARIO_BANNER[displayScenarioLabel] ?? SCENARIO_BANNER["Neutral"];
 
   const metricsGrid = buildMetricsGrid(horizon, a);
 
@@ -179,7 +179,7 @@ export default function StockCard({ stock }: Props) {
           {a && (
             <p className="text-2xl font-semibold text-gray-800 mt-0.5">
               ${fmt(a.price)}{" "}
-              <span className={`text-sm font-medium ${changeColor}`}>
+              <span style={{ fontSize: 14, fontWeight: 500, marginLeft: 4, color: changeColor }}>
                 {a.changePercent >= 0 ? "+" : ""}
                 {fmt(a.changePercent)}%
               </span>
@@ -221,7 +221,7 @@ export default function StockCard({ stock }: Props) {
               <span>Confianza algorítmica</span>
               <span className="font-medium text-gray-700">{prescriptiveAction.confidenceScore}%</span>
             </div>
-            <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--background)" }}>
               <div
                 className={`h-full rounded-full transition-all ${actionStyle.bar}`}
                 style={{ width: `${prescriptiveAction.confidenceScore}%` }}
@@ -264,9 +264,9 @@ export default function StockCard({ stock }: Props) {
 
           {/* Banner horizonte obsoleto (solo para registros sin allHorizons) */}
           {isStaleHorizon && (
-            <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
-              Los datos guardados son de <span className="font-semibold">{HORIZON_LABELS[storedHorizon!]}</span>.
-              Pulsa «Actualizar datos» para analizar en <span className="font-semibold">{HORIZON_LABELS[horizon]}</span>.
+            <div style={{ borderRadius: 8, border: "1px solid rgba(245,158,11,.35)", background: "rgba(245,158,11,.10)", padding: "8px 12px", fontSize: 12, color: "#FCD34D" }}>
+              Los datos guardados son de <strong>{HORIZON_LABELS[storedHorizon!]}</strong>.
+              Pulsa «Actualizar datos» para analizar en <strong>{HORIZON_LABELS[horizon]}</strong>.
             </div>
           )}
 
@@ -279,29 +279,32 @@ export default function StockCard({ stock }: Props) {
             <>
               {/* Alerta de divergencia técnico-sentimiento (IA) */}
               {displayDivergenceAlert && (
-                <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  <span className="mt-0.5 shrink-0">⚠</span>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start", borderRadius: 8, border: "1px solid rgba(245,158,11,.4)", background: "rgba(245,158,11,.1)", padding: "9px 12px", fontSize: 13, color: "#FCD34D", lineHeight: 1.5 }}>
+                  <span style={{ flexShrink: 0, marginTop: 1 }}>⚠</span>
                   <span>
-                    <span className="font-semibold">Divergencia técnico-fundamental detectada.</span>{" "}
+                    <strong>Divergencia técnico-fundamental detectada.</strong>{" "}
                     Los indicadores técnicos y el sentimiento noticioso apuntan en direcciones opuestas.
                   </span>
                 </div>
               )}
 
               {/* Badge de divergencia clásica precio/RSI */}
-              {priceRsiDivergence && (
-                <div
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${DIVERGENCE_BADGE[priceRsiDivergence.type] ?? ""}`}
-                  title={priceRsiDivergence.description}
-                >
-                  <span>{priceRsiDivergence.type.replace(/_/g, " ")}</span>
-                  <span className="opacity-60">· {priceRsiDivergence.strength}</span>
-                </div>
-              )}
+              {priceRsiDivergence && (() => {
+                const db = DIVERGENCE_BADGE[priceRsiDivergence.type];
+                return db ? (
+                  <span
+                    title={priceRsiDivergence.description}
+                    style={{ alignSelf: "flex-start", display: "inline-flex", gap: 6, alignItems: "center", borderRadius: 9999, border: `1px solid ${db.bd}`, background: db.bg, color: db.fg, padding: "3px 11px", fontSize: 11, fontWeight: 600 }}
+                  >
+                    {priceRsiDivergence.type.replace(/_/g, " ")}
+                    <span style={{ opacity: 0.6 }}>· {priceRsiDivergence.strength}</span>
+                  </span>
+                ) : null;
+              })()}
 
               {/* Escenario */}
-              <div className={`rounded-lg border px-3 py-2 text-sm ${sentimentClass}`}>
-                <span className="font-semibold">Escenario {displayScenarioLabel}:</span>{" "}
+              <div style={{ borderRadius: 8, border: `1px solid ${scenarioBanner.bd}`, background: scenarioBanner.bg, color: scenarioBanner.fg, padding: "9px 12px", fontSize: 13, lineHeight: 1.5 }}>
+                <strong>Escenario {displayScenarioLabel}:</strong>{" "}
                 {displayScenarioJust}
               </div>
 
@@ -310,16 +313,16 @@ export default function StockCard({ stock }: Props) {
 
               {/* Encaje con horizonte */}
               {displayHorizonMatch && (
-                <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-                  <span className="font-semibold">Encaje con {HORIZON_LABELS[horizon]}:</span>{" "}
+                <div style={{ borderRadius: 8, border: "1px solid rgba(37,99,235,.3)", background: "rgba(37,99,235,.12)", padding: "9px 12px", fontSize: 12, color: "#93C5FD", lineHeight: 1.5 }}>
+                  <strong>Encaje con {HORIZON_LABELS[horizon]}:</strong>{" "}
                   {displayHorizonMatch}
                 </div>
               )}
 
               {/* Alerta de solapamiento de cartera */}
               {displayPortfolioAlert && (
-                <div className="rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800">
-                  <span className="font-semibold">Riesgo de cartera:</span>{" "}{displayPortfolioAlert}
+                <div style={{ borderRadius: 8, border: "1px solid rgba(249,115,22,.4)", background: "rgba(249,115,22,.1)", padding: "9px 12px", fontSize: 12, color: "#FDBA74", lineHeight: 1.5 }}>
+                  <strong>Riesgo de cartera:</strong>{" "}{displayPortfolioAlert}
                 </div>
               )}
 
@@ -329,7 +332,7 @@ export default function StockCard({ stock }: Props) {
                   {displayKeyMetrics.map((m) => (
                     <span
                       key={m}
-                      className="inline-block rounded-full bg-gray-100 px-2.5 py-0.5 text-xs text-gray-600"
+                      style={{ borderRadius: 9999, background: "var(--card-inner)", color: "var(--fg-4)", padding: "4px 11px", fontSize: 12 }}
                     >
                       {m}
                     </span>
@@ -345,13 +348,7 @@ export default function StockCard({ stock }: Props) {
               <p className="text-xs font-medium text-gray-500 mb-1">
                 Noticias recientes · Sentimiento:{" "}
                 <span
-                  className={
-                    a.newsSentiment === "Positivo"
-                      ? "text-green-600"
-                      : a.newsSentiment === "Negativo"
-                      ? "text-red-600"
-                      : "text-yellow-600"
-                  }
+                  style={{ color: a.newsSentiment === "Positivo" ? "#4ADE80" : a.newsSentiment === "Negativo" ? "#F87171" : "#FBBF24" }}
                 >
                   {a.newsSentiment}
                 </span>
