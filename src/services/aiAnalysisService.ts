@@ -510,6 +510,13 @@ export async function generateAllHorizonsAnalysis(
 
 // ── Batch All-Horizons Analysis ───────────────────────────────────────────────
 
+export interface DataQuality {
+  technical:    boolean; // historical closes + indicators available
+  fundamentals: boolean; // Yahoo fundamentals available
+  news:         boolean; // NewsAPI articles available
+  degraded:     boolean; // any required source failed (quote or historical)
+}
+
 export interface BatchStockInput {
   ticker: string;
   price: number;
@@ -521,6 +528,7 @@ export interface BatchStockInput {
   quantMetrics?: PortfolioQuantMetrics | null;
   fearGreedScore?: number | null;
   earningsGuidance?: EarningsGuidanceInsight | null;
+  dataQuality?: DataQuality;
 }
 
 // Max tickers per Gemini call. 4 keeps the prompt + response under ~8k tokens.
@@ -551,6 +559,16 @@ function formatStockDataBlock(input: BatchStockInput): string {
   if (earningsGuidance) {
     const rev = earningsGuidance.revenueGuidanceYoY != null ? `${earningsGuidance.revenueGuidanceYoY}% YoY` : "N/D";
     lines.push(`  Guidance (${earningsGuidance.fiscalQuarter}): ${earningsGuidance.sentiment} | Revenue: ${rev} | EPS: ${earningsGuidance.epsGuidanceStatus}`);
+  }
+  if (input.dataQuality?.degraded) {
+    const missing = [
+      !input.dataQuality.technical    && "indicadores técnicos",
+      !input.dataQuality.fundamentals && "fundamentales",
+      !input.dataQuality.news         && "noticias",
+    ].filter(Boolean).join(", ");
+    if (missing) {
+      lines.push(`  DATOS PARCIALES: ${missing} no disponibles — reduce confidenceScore para este activo e infiere con mayor cautela.`);
+    }
   }
   return lines.join("\n");
 }

@@ -1,9 +1,11 @@
 import { getCurrentQuote, getHistoricalCloses } from "./marketDataService";
+import type { CurrentQuote, HistoricalData } from "./marketDataService";
+import { withTimeout } from "@/lib/withTimeout";
 import { calculateIndicators } from "./technicalAnalysisService";
 import { analyzeNewsForTicker, fetchArticlesForTicker, batchAnalyzeSentiment } from "./newsAnalysisService";
 import type { DataIssue, NewsAnalysis } from "./newsAnalysisService";
 import { batchGenerateAllHorizons, FALLBACK_HORIZON } from "./aiAnalysisService";
-import type { AllHorizonsAIAnalysis, HorizonAnalysis, BatchStockInput } from "./aiAnalysisService";
+import type { AllHorizonsAIAnalysis, HorizonAnalysis, BatchStockInput, DataQuality } from "./aiAnalysisService";
 import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore } from "./quantitativeService";
 import { getGlobalContext } from "./macroService";
 import type { MacroGlobalContext } from "./macroService";
@@ -27,6 +29,58 @@ import type { StockAnalysisModel, InvestmentHorizon } from "@/types/models";
 import type { UpdateType } from "@/types/updateTypes";
 
 const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
+
+// ── Per-service timeout budgets (ms) ─────────────────────────────────────────
+const TIMEOUTS = {
+  quote:           3_000,   // Finnhub real-time quote
+  historical:      8_000,   // Yahoo Finance candlestick data
+  fundamentals:    6_000,   // Yahoo Finance quoteSummary
+  news:            5_000,   // NewsAPI article fetch
+  geminiPerStock: 25_000,   // Gemini per-stock (used to scale batch budget)
+  geminiPortfolio:30_000,   // Gemini portfolio analysis
+} as const;
+
+// ── Typed fallbacks — allow partial-data analysis when an API source fails ───
+interface DefaultFallbacks {
+  quote(ticker: string): CurrentQuote;
+  historical(ticker: string): HistoricalData;
+  fundamentals: import("@/lib/yahooFinanceClient").AllFundamentals;
+}
+
+const DEFAULT_FALLBACKS: DefaultFallbacks = {
+  quote: (ticker) => ({
+    ticker,
+    price:         0,
+    previousClose: 0,
+    change:        0,
+    changePercent: 0,
+    fetchedAt:     new Date().toISOString(),
+  }),
+  historical: (ticker) => ({
+    ticker,
+    closes:  [],
+    highs:   [],
+    lows:    [],
+    volumes: [],
+    dates:   [],
+  }),
+  fundamentals: {
+    medium: {
+      revenueGrowthYoY: null,
+      forwardEps:       null,
+      pegRatio:         null,
+      debtToEquity:     null,
+      returnOnEquity:   null,
+    },
+    long: {
+      trailingPE:        null,
+      dividendYield:     null,
+      profitMargin:      null,
+      freeCashflowYield: null,
+      beta:              null,
+    },
+  },
+};
 
 export interface OrchestrationResult {
   ticker: string;
@@ -143,7 +197,11 @@ export async function runPortfolioOnlyAnalysis(
       };
     });
 
-    const portfolioAnalysis = await generatePortfolioAnalysis(inputs);
+    const portfolioAnalysis = await withTimeout(
+      generatePortfolioAnalysis(inputs),
+      TIMEOUTS.geminiPortfolio,
+      "Gemini:portfolio"
+    );
     await upsertPortfolioAnalysis(userId, portfolioAnalysis, inputs.length);
     return { success: true };
   } catch (e) {
@@ -180,21 +238,41 @@ async function runFullAnalysis(
   if (staleStocks.length === 0) return finalResults;
   console.log(`[ORCHESTRATOR] ${staleStocks.length} stale / ${finalResults.length} cached (force=${forceUpdate})`);
 
-  // Phase 2: Market data + fundamentals (parallel)
+  // Phase 2: Market data + fundamentals (parallel, individual timeouts per source)
+  // Each source is wrapped with withTimeout so a single slow API cannot block
+  // the whole batch. Failures degrade gracefully via DEFAULT_FALLBACKS, allowing
+  // Gemini to run with partial data and dataQuality to surface what is missing.
   type MarketData = {
     stock: StockInput;
-    quote: Awaited<ReturnType<typeof getCurrentQuote>>;
+    quote: CurrentQuote;
     indicators: ReturnType<typeof calculateIndicators>;
     allFundamentals: AllFundamentals;
+    dataQuality: DataQuality;
   };
 
   const marketResults = await Promise.allSettled(
     staleStocks.map(async (stock): Promise<MarketData> => {
-      const [quote, historical, allFundamentals] = await Promise.all([
-        getCurrentQuote(stock.ticker),
-        getHistoricalCloses(stock.ticker, 60),
-        fetchAllFundamentals(stock.ticker),
+      const [quoteResult, historicalResult, fundamentalsResult] = await Promise.allSettled([
+        withTimeout(getCurrentQuote(stock.ticker),         TIMEOUTS.quote,        `Finnhub:${stock.ticker}`),
+        withTimeout(getHistoricalCloses(stock.ticker, 60), TIMEOUTS.historical,   `Yahoo:historical:${stock.ticker}`),
+        withTimeout(fetchAllFundamentals(stock.ticker),    TIMEOUTS.fundamentals, `Yahoo:fundamentals:${stock.ticker}`),
       ]);
+
+      if (quoteResult.status        === "rejected") console.warn(`[ORCHESTRATOR] Quote fallback for ${stock.ticker}:`,        quoteResult.reason);
+      if (historicalResult.status   === "rejected") console.warn(`[ORCHESTRATOR] Historical fallback for ${stock.ticker}:`,   historicalResult.reason);
+      if (fundamentalsResult.status === "rejected") console.warn(`[ORCHESTRATOR] Fundamentals fallback for ${stock.ticker}:`, fundamentalsResult.reason);
+
+      const quote           = quoteResult.status        === "fulfilled" ? quoteResult.value        : DEFAULT_FALLBACKS.quote(stock.ticker);
+      const historical      = historicalResult.status   === "fulfilled" ? historicalResult.value   : DEFAULT_FALLBACKS.historical(stock.ticker);
+      const allFundamentals = fundamentalsResult.status === "fulfilled" ? fundamentalsResult.value : DEFAULT_FALLBACKS.fundamentals;
+
+      const dataQuality: DataQuality = {
+        technical:    historicalResult.status === "fulfilled" && historical.closes.length > 0,
+        fundamentals: fundamentalsResult.status === "fulfilled",
+        news:         true, // refined in Phase 5 once article results are available
+        degraded:     quoteResult.status === "rejected" || historicalResult.status === "rejected",
+      };
+
       return {
         stock,
         quote,
@@ -206,6 +284,7 @@ async function runFullAnalysis(
           historical.lows,
           historical.volumes
         ),
+        dataQuality,
       };
     })
   );
@@ -213,8 +292,9 @@ async function runFullAnalysis(
   const withMarket: MarketData[] = [];
   marketResults.forEach((r, i) => {
     if (r.status === "rejected") {
+      // Only truly unexpected errors reach here now (e.g. OOM, thrown inside calculateIndicators)
       const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
-      console.error(`[ORCHESTRATOR] Market data error for ${staleStocks[i].ticker}: ${msg}`);
+      console.error(`[ORCHESTRATOR] Unexpected market error for ${staleStocks[i].ticker}: ${msg}`);
       finalResults.push({
         ticker: staleStocks[i].ticker, stockId: staleStocks[i].id,
         success: false, error: msg,
@@ -247,7 +327,7 @@ async function runFullAnalysis(
   await Promise.allSettled(
     withMarket.map(async ({ stock }) => {
       try {
-        const h = await getHistoricalCloses(stock.ticker, 30);
+        const h = await withTimeout(getHistoricalCloses(stock.ticker, 30), TIMEOUTS.historical, `Yahoo:quant:${stock.ticker}`);
         if (h.closes.length >= 5) quantHistoricalData[stock.ticker] = h.closes;
       } catch { /* skip */ }
     })
@@ -259,7 +339,9 @@ async function runFullAnalysis(
   // Phase 3: Fetch news articles (NewsAPI only, no Gemini) + earnings in parallel
   const [articleResults, earningsResults] = await Promise.all([
     Promise.allSettled(
-      withMarket.map(({ stock }) => fetchArticlesForTicker(stock.ticker))
+      withMarket.map(({ stock }) =>
+        withTimeout(fetchArticlesForTicker(stock.ticker), TIMEOUTS.news, `NewsAPI:${stock.ticker}`)
+      )
     ),
     Promise.allSettled(
       withMarket.map(({ stock }) =>
@@ -308,7 +390,7 @@ async function runFullAnalysis(
   }
 
   // Phase 5: Build batch inputs and run batch all-horizons AI (ceil(N/4) Gemini calls)
-  const batchInputs: BatchStockInput[] = withMarket.map(({ stock, quote, indicators, allFundamentals }, i) => {
+  const batchInputs: BatchStockInput[] = withMarket.map(({ stock, quote, indicators, allFundamentals, dataQuality }, i) => {
     const quantMetrics = findTickerMetrics(allQuantMetrics, stock.ticker);
     const newsAnalysis = newsAnalysisMap.get(stock.ticker)!;
     const sentiment = newsAnalysis.sentiment as "Positivo" | "Neutral" | "Negativo";
@@ -317,6 +399,14 @@ async function runFullAnalysis(
       : null;
     const earningsResult = earningsResults[i];
     const earningsGuidance = earningsResult.status === "fulfilled" ? earningsResult.value : null;
+
+    // Finalise dataQuality.news now that article results are available
+    const newsOk = articleResults[i].status === "fulfilled";
+    const finalDataQuality: DataQuality = {
+      ...dataQuality,
+      news:     newsOk,
+      degraded: dataQuality.degraded || !newsOk,
+    };
 
     return {
       ticker: stock.ticker,
@@ -329,10 +419,18 @@ async function runFullAnalysis(
       quantMetrics,
       fearGreedScore,
       earningsGuidance,
+      dataQuality: finalDataQuality,
     };
   });
 
-  const allHorizonsMap = await batchGenerateAllHorizons(batchInputs, macroContext);
+  const allHorizonsMap = await withTimeout(
+    batchGenerateAllHorizons(batchInputs, macroContext),
+    TIMEOUTS.geminiPerStock * batchInputs.length,
+    `Gemini:batch:${batchInputs.length}`
+  ).catch((err: unknown) => {
+    console.warn(`[ORCHESTRATOR] Gemini batch timed out: ${err instanceof Error ? err.message : err}`);
+    return new Map<string, AllHorizonsAIAnalysis>();
+  });
 
   // Phase 6: Persist results in parallel
   const persistResults = await Promise.allSettled(

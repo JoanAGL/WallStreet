@@ -10,6 +10,7 @@ import {
   type OrchestrationResult,
 } from "@/services/analysisOrchestrator";
 import { generatePortfolioAnalysis } from "@/services/portfolioAIService";
+import { withTimeout } from "@/lib/withTimeout";
 import {
   getPortfolioAnalysis,
   isPortfolioFresh,
@@ -111,7 +112,11 @@ export async function POST(req: NextRequest) {
         if (forceUpdate || !isPortfolioFresh(portfolioRecord)) {
           const stockMap = new Map(allStocks.map((s) => [s.id, s]));
           const inputs = buildPortfolioInputs(successfulResults, stockMap);
-          const portfolioAnalysis = await generatePortfolioAnalysis(inputs);
+          const portfolioAnalysis = await withTimeout(
+            generatePortfolioAnalysis(inputs),
+            30_000,
+            "Gemini:portfolio"
+          );
           await upsertPortfolioAnalysis(userId, portfolioAnalysis, inputs.length);
         }
       } catch (e) {

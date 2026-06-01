@@ -289,16 +289,21 @@ describe("runAnalysisForStocks — pipeline integration", () => {
     expect(upsertAnalysis).toHaveBeenCalled();
   });
 
-  it("handles market data failure — does not call Gemini", async () => {
-    vi.mocked(getCurrentQuote).mockRejectedValue(new Error("Yahoo Finance timeout"));
+  it("handles quote failure gracefully — falls back to price:0, Gemini runs with degraded data", async () => {
+    // Only the quote fails; historical + fundamentals are still mocked to succeed.
+    // The new pipeline uses DEFAULT_FALLBACKS.quote instead of hard-failing the stock.
+    vi.mocked(getCurrentQuote).mockRejectedValue(new Error("Finnhub timeout"));
 
     const results = await runAnalysisForStocks(
       [{ id: MOCK_STOCK.id, ticker: MOCK_TICKER, investmentHorizon: "SHORT_TERM" }],
       true
     );
 
-    expect(results[0].success).toBe(false);
-    expect(vi.mocked(geminiChat)).not.toHaveBeenCalled();
+    expect(results[0].success).toBe(true);
+    expect(results[0].analysis).toBeDefined();
+    expect(upsertAnalysis).toHaveBeenCalled();
+    // Gemini still runs because historical + fundamentals succeeded
+    expect(vi.mocked(geminiChat)).toHaveBeenCalled();
   });
 
   it("uses cached analysis when fresh (forceUpdate=false)", async () => {
