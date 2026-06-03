@@ -10,7 +10,6 @@ function normHeader(h: string): string {
   return stripAccents(h.trim()).toLowerCase();
 }
 
-/** Parses a single CSV line handling quoted fields that may contain commas. */
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
   let cur = "";
@@ -30,12 +29,10 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
-/** Converts DEGIRO numeric strings like "\"209,5000\"" or "-3602,75" to float. */
 function parseDegNum(s: string): number {
   return parseFloat((s ?? "").trim().replace(/"/g, "").replace(",", "."));
 }
 
-/** Parses DEGIRO date (DD-MM-YYYY) and time (HH:MM) into a JS Date. */
 function parseDegDate(fecha: string, hora: string): Date {
   const parts = fecha.split(/[-/]/);
   if (parts.length !== 3) return new Date();
@@ -44,10 +41,6 @@ function parseDegDate(fecha: string, hora: string): Date {
   return new Date(y, mo - 1, d, h, m, 0, 0);
 }
 
-/**
- * Extracts a ticker from a DEGIRO product string.
- * Strategy: parentheses match → already-short-caps → first caps word → fallback.
- */
 function extractTicker(producto: string, isin: string): string {
   const s = producto.trim();
   if (/^[A-Z0-9.]{1,7}$/.test(s)) return s;
@@ -64,44 +57,32 @@ function extractTicker(producto: string, isin: string): string {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface DegiroRow {
-  fecha:    string;
-  hora:     string;
-  producto: string;
-  isin:     string;
-  numero:   number;   // positive = BUY, negative = SELL
-  precio:   number;
-  valorEur: number;
+  fecha: string; hora: string; producto: string; isin: string;
+  numero: number; precio: number; valorEur: number;
 }
 
 export interface ImportResult {
-  imported:      number;
-  skipped:       number;
-  stocksCreated: number;
+  imported: number; skipped: number; stocksCreated: number;
 }
 
 // ── Main import function ──────────────────────────────────────────────────────
 
-export async function importDegiroCSV(
-  buffer: Buffer,
-  userId: string
-): Promise<ImportResult> {
-  const text = buffer.toString("utf-8").replace(/^﻿/, ""); // strip BOM
+export async function importDegiroCSV(buffer: Buffer, userId: string): Promise<ImportResult> {
+  const text = buffer.toString("utf-8").replace(/^﻿/, "");
   const allLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
   if (allLines.length < 2) throw new Error("El archivo CSV está vacío.");
 
-  // Find the header row (first column normalises to "fecha" or "date")
   const headerIdx = allLines.findIndex((l) => {
     const first = normHeader(parseCSVLine(l)[0] ?? "");
     return first === "fecha" || first === "date";
   });
   if (headerIdx < 0) {
     throw new Error(
-      "No se encontró la cabecera del CSV de DEGIRO. Asegúrate de exportar las transacciones desde la sección 'Actividad → Transacciones'."
+      "No se encontró la cabecera del CSV de DEGIRO. Exporta desde Actividad → Transacciones."
     );
   }
 
-  // Build column-name → index map (skip empty headers = currency columns)
   const rawHeaders = parseCSVLine(allLines[headerIdx]);
   const col: Record<string, number> = {};
   rawHeaders.forEach((h, i) => {
@@ -113,15 +94,13 @@ export async function importDegiroCSV(
     if (!(req in col)) throw new Error(`Columna requerida "${req}" no encontrada.`);
   }
 
-  // DEGIRO may name the EUR total "valor eur" or "total"
-  const eurKey = "valor eur" in col ? "valor eur" : "total";
+  const eurKey  = "valor eur" in col ? "valor eur" : "total";
   const horaKey = "hora" in col ? "hora" : null;
 
-  // Parse data rows
   const rows: DegiroRow[] = [];
   for (const line of allLines.slice(headerIdx + 1)) {
-    const cells = parseCSVLine(line);
-    const fecha = (cells[col["fecha"]] ?? "").trim();
+    const cells  = parseCSVLine(line);
+    const fecha  = (cells[col["fecha"]] ?? "").trim();
     if (!fecha) continue;
 
     const hora     = horaKey ? (cells[col[horaKey]] ?? "00:00").trim() : "00:00";
@@ -131,118 +110,117 @@ export async function importDegiroCSV(
     const precio   = parseDegNum(cells[col["precio"]] ?? "");
     const valorEur = parseDegNum(cells[col[eurKey] ?? -1] ?? "");
 
-    // Skip non-trading rows (dividends, deposits, currency ops have numero=0)
     if (!producto || !isFinite(numero) || numero === 0) continue;
     if (!isFinite(precio) || precio <= 0) continue;
 
     rows.push({ fecha, hora, producto, isin, numero, precio, valorEur: isFinite(valorEur) ? valorEur : 0 });
   }
 
-  if (rows.length === 0) {
-    throw new Error("No se encontraron transacciones válidas (compras/ventas) en el archivo.");
-  }
+  if (rows.length === 0) throw new Error("No se encontraron transacciones válidas en el archivo.");
 
   // CRITICAL: DEGIRO exports newest-first → reverse for chronological WAC
   rows.reverse();
 
-  // ── Atomic DB import ──────────────────────────────────────────────────────
-  let imported      = 0;
-  let skipped       = 0;
+  // ── Phase 1: find or create Stocks (outside any transaction) ─────────────
+  // Process unique stocks in a single pass to avoid redundant DB calls
+  const stockCache  = new Map<string, string>(); // cacheKey → stockId
   let stocksCreated = 0;
 
-  await prisma.$transaction(
-    async (tx) => {
-      const stockCache = new Map<string, string>(); // cacheKey → stockId
+  const seenKeys = new Set<string>();
+  for (const row of rows) {
+    const ticker   = extractTicker(row.producto, row.isin);
+    const cacheKey = row.isin || ticker;
+    if (seenKeys.has(cacheKey)) continue;
+    seenKeys.add(cacheKey);
 
-      // ── Phase 1: find or create Stocks ─────────────────────────────────
-      for (const row of rows) {
-        const ticker   = extractTicker(row.producto, row.isin);
-        const cacheKey = row.isin || ticker;
-        if (stockCache.has(cacheKey)) continue;
+    let stock = row.isin
+      ? await prisma.stock.findFirst({ where: { isin: row.isin, userId } })
+      : null;
+    if (!stock) {
+      stock = await prisma.stock.findUnique({ where: { ticker_userId: { ticker, userId } } });
+    }
+    if (!stock) {
+      stock = await prisma.stock.create({
+        data: { userId, ticker, isin: row.isin || undefined, name: row.producto || undefined },
+      });
+      stocksCreated++;
+    } else if (!stock.isin && row.isin) {
+      stock = await prisma.stock.update({
+        where: { id: stock.id },
+        data: { isin: row.isin, name: stock.name ?? row.producto },
+      });
+    }
+    stockCache.set(cacheKey, stock.id);
+  }
 
-        // Lookup: ISIN → ticker → create
-        let stock = row.isin
-          ? await tx.stock.findFirst({ where: { isin: row.isin, userId } })
-          : null;
+  // ── Phase 2: bulk-fetch existing transactions for deduplication ───────────
+  // Load everything in one query → no per-row DB round trips
+  const stockIds = Array.from(new Set(Array.from(stockCache.values())));
+  const existingTxs = await prisma.transaction.findMany({
+    where:  { stockId: { in: stockIds } },
+    select: { stockId: true, type: true, shares: true, price: true, date: true },
+  });
 
-        if (!stock) {
-          stock = await tx.stock.findUnique({
-            where: { ticker_userId: { ticker, userId } },
-          });
-        }
-
-        if (!stock) {
-          stock = await tx.stock.create({
-            data: {
-              userId,
-              ticker,
-              isin: row.isin || undefined,
-              name: row.producto || undefined,
-            },
-          });
-          stocksCreated++;
-        } else if (!stock.isin && row.isin) {
-          stock = await tx.stock.update({
-            where: { id: stock.id },
-            data: { isin: row.isin, name: stock.name ?? row.producto },
-          });
-        }
-
-        stockCache.set(cacheKey, stock.id);
-      }
-
-      // ── Phase 2: insert Transactions (with deduplication) ──────────────
-      for (const row of rows) {
-        const ticker   = extractTicker(row.producto, row.isin);
-        const cacheKey = row.isin || ticker;
-        const stockId  = stockCache.get(cacheKey);
-        if (!stockId) continue;
-
-        const type   = row.numero > 0 ? "BUY" : "SELL";
-        const shares = Math.abs(row.numero);
-        const txDate = parseDegDate(row.fecha, row.hora);
-
-        const exists = await tx.transaction.findFirst({
-          where: { stockId, type, shares, price: row.precio, date: txDate },
-        });
-        if (exists) { skipped++; continue; }
-
-        await tx.transaction.create({
-          data: { stockId, type, shares, price: row.precio, date: txDate },
-        });
-        imported++;
-      }
-
-      // ── Phase 3: recompute WAC → update Stock.quantity / purchasePrice ──
-      for (const [, stockId] of Array.from(stockCache)) {
-        const txs = await tx.transaction.findMany({
-          where:   { stockId },
-          orderBy: [{ date: "asc" }, { createdAt: "asc" }],
-        });
-
-        let open    = 0;
-        let avgCost = 0;
-        for (const t of txs) {
-          if (t.type === "BUY") {
-            const total = avgCost * open + t.price * t.shares;
-            open        = Math.round((open + t.shares) * 1e6) / 1e6;
-            avgCost     = open > 0 ? total / open : 0;
-          } else {
-            open = Math.round(Math.max(0, open - t.shares) * 1e6) / 1e6;
-          }
-        }
-
-        await tx.stock.update({
-          where: { id: stockId },
-          data: {
-            quantity:      Math.round(open * 1e6) / 1e6,
-            purchasePrice: avgCost > 0 ? Math.round(avgCost * 100) / 100 : null,
-          },
-        });
-      }
-    },
-    { timeout: 30_000 }
+  const dedupSet = new Set(
+    existingTxs.map((t) =>
+      `${t.stockId}|${t.type}|${t.shares}|${t.price}|${t.date?.getTime() ?? 0}`
+    )
   );
 
-  return { imported, skipped, stocksCreated };
+  // ── Phase 3: build insert list (in-memory dedup) ──────────────────────────
+  type TxInsert = { stockId: string; type: "BUY" | "SELL"; shares: number; price: number; date: Date };
+  const toInsert: TxInsert[] = [];
+
+  for (const row of rows) {
+    const ticker   = extractTicker(row.producto, row.isin);
+    const cacheKey = row.isin || ticker;
+    const stockId  = stockCache.get(cacheKey);
+    if (!stockId) continue;
+
+    const type   = row.numero > 0 ? "BUY" : "SELL";
+    const shares = Math.abs(row.numero);
+    const date   = parseDegDate(row.fecha, row.hora);
+    const key    = `${stockId}|${type}|${shares}|${row.precio}|${date.getTime()}`;
+
+    if (!dedupSet.has(key)) {
+      toInsert.push({ stockId, type, shares, price: row.precio, date });
+      dedupSet.add(key); // prevent duplicates within the same file
+    }
+  }
+
+  const skipped = rows.length - toInsert.length;
+
+  // ── Phase 4: bulk insert with createMany (atomic, no interactive tx) ──────
+  if (toInsert.length > 0) {
+    await prisma.transaction.createMany({ data: toInsert });
+  }
+
+  // ── Phase 5: recompute WAC → update Stock.quantity / purchasePrice ────────
+  for (const [, stockId] of Array.from(stockCache)) {
+    const allTxs = await prisma.transaction.findMany({
+      where:   { stockId },
+      orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+    });
+
+    let open = 0, avgCost = 0;
+    for (const t of allTxs) {
+      if (t.type === "BUY") {
+        const total = avgCost * open + t.price * t.shares;
+        open    = Math.round((open + t.shares) * 1e6) / 1e6;
+        avgCost = open > 0 ? total / open : 0;
+      } else {
+        open = Math.round(Math.max(0, open - t.shares) * 1e6) / 1e6;
+      }
+    }
+
+    await prisma.stock.update({
+      where: { id: stockId },
+      data: {
+        quantity:      Math.round(open * 1e6) / 1e6,
+        purchasePrice: avgCost > 0 ? Math.round(avgCost * 100) / 100 : null,
+      },
+    });
+  }
+
+  return { imported: toInsert.length, skipped, stocksCreated };
 }
