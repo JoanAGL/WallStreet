@@ -46,6 +46,17 @@ export default function PortfolioSummary({ stocks, realizedPnL }: Props) {
   const withPosition = withAnalysis.filter(
     (s) => s.purchasePrice != null && s.quantity != null
   );
+
+  // Detect open positions excluded from calculations
+  const withoutPrice = withAnalysis.filter(
+    (s) => s.quantity != null && s.quantity > 0 &&
+           (s.analysis == null || !s.analysis.price || s.analysis.price <= 0)
+  );
+  const withoutCost = withAnalysis.filter(
+    (s) => s.quantity != null && s.quantity > 0 &&
+           s.analysis?.price != null && s.analysis.price > 0 &&
+           (s.purchasePrice == null || s.purchasePrice <= 0)
+  );
   const totalCost    = withPosition.reduce((sum, s) => sum + s.purchasePrice! * s.quantity!, 0);
   const totalValue   = withPosition.reduce((sum, s) => sum + (s.analysis?.price ?? 0) * s.quantity!, 0);
   const totalPnl     = withPosition.length > 0 ? totalValue - totalCost : null;
@@ -172,6 +183,43 @@ export default function PortfolioSummary({ stocks, realizedPnL }: Props) {
           {withPosition.length < withAnalysis.length && (
             <span style={{ color: "var(--fg-5)", fontStyle: "italic" }}>
               · {withPosition.length}/{withAnalysis.length} posiciones
+            </span>
+          )}
+        </div>
+      )}
+
+      {(withoutPrice.length > 0 || withoutCost.length > 0) && (
+        <div style={{
+          marginTop: 6,
+          padding: "8px 12px",
+          borderRadius: 8,
+          background: "rgba(245,158,11,.10)",
+          border: "1px solid rgba(245,158,11,.35)",
+          fontSize: 12,
+          color: "#FCD34D",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}>
+          <span style={{ fontWeight: 600 }}>
+            &#9888; El total puede diferir de tu broker &mdash; hay posiciones excluidas del cálculo:
+          </span>
+          {withoutPrice.length > 0 && (
+            <span style={{ color: "var(--fg-4)" }}>
+              &middot; Sin precio de mercado (no suman al valor ni al P&amp;L):{" "}
+              <span style={{ fontWeight: 600, color: "#FCD34D" }}>
+                {withoutPrice.map((s) => s.ticker).join(", ")}
+              </span>
+              {" "}&rarr; pulsa &laquo;Actualizar datos&raquo;
+            </span>
+          )}
+          {withoutCost.length > 0 && (
+            <span style={{ color: "var(--fg-4)" }}>
+              &middot; Sin precio de compra registrado (valor incluido, P&amp;L no calculable):{" "}
+              <span style={{ fontWeight: 600, color: "#FCD34D" }}>
+                {withoutCost.map((s) => s.ticker).join(", ")}
+              </span>
+              {" "}&rarr; añade transacciones en el panel de cada acción
             </span>
           )}
         </div>
