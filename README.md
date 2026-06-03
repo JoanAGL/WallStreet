@@ -167,9 +167,9 @@ Tema oscuro fintech inspirado en MyInvestor / DeGiro, implementado mediante un d
 **Sin dark-mode automático** — estilos fijos para consistencia visual independientemente de la preferencia del sistema.
 
 ### Actualización de datos
-- **Actualización manual** — Botón en dashboard con caché de 4h; muestra resultado completo: actualizadas · en caché · con error (con tickers afectados)
-- **Actualización parcial** — Opciones individuales: solo precio, solo técnicos, solo noticias (sin consumir créditos IA)
-- **Cron job diario** — Lunes–viernes a las 08:00 UTC (antes de la apertura de Wall Street a las 14:30 UTC), ejecutado por Vercel Cron
+- **Actualización manual** — Botón en dashboard con rate-limit de 5 min (completo) / 1 min (por ticker); muestra resultado: actualizadas · en caché · con error (tickers afectados). Excluye automáticamente posiciones cerradas (`quantity = 0`) del análisis IA y noticias
+- **Actualización parcial** — Tipos configurables: `price`, `news`, `technicals`, `ai`, `portfolio`; se pueden combinar en el body de `POST /api/update`
+- **Cron job diario** — Lunes–viernes a las 08:00 UTC (antes de la apertura de Wall Street a las 14:30 UTC), ejecutado por Vercel Cron (`0 8 * * 1-5`)
 - **Procesado en batch** — Grupos de hasta 4 acciones por llamada Gemini para minimizar latencia y consumo de API
 
 ### Resiliencia y seguridad
@@ -210,33 +210,39 @@ src/
 │   │   ├── auth/                 # NextAuth + registro
 │   │   │   ├── [...nextauth]/    # Catch-all NextAuth
 │   │   │   └── register/         # POST: email + password
-│   │   ├── stocks/               # GET/POST/DELETE acciones
-│   │   ├── update/               # POST: actualización manual
+│   │   ├── stocks/               # GET/POST: listar y añadir acciones
+│   │   │   └── [ticker]/         # DELETE: eliminar acción por ticker
+│   │   ├── update/               # POST: actualización manual (tipos: price|news|technicals|ai|portfolio)
 │   │   ├── cron/daily-update/    # POST: cron job Vercel (L–V 08:00 UTC)
 │   │   ├── portfolio/
 │   │   │   ├── correlation/      # GET: matriz de correlación
 │   │   │   ├── optimize/         # GET: Black-Litterman
 │   │   │   ├── rebalance/        # POST: rebalanceo + tax harvesting
-│   │   │   ├── simulation/       # POST: Monte Carlo + stress tests
+│   │   │   ├── simulate/         # POST: Monte Carlo + stress tests
 │   │   │   ├── export/           # GET: exportación CSV de cartera (?format=csv)
-│   │   │   ├── sell/             # POST: registrar venta + cerrar/reducir posición (legado)
-│   │   │   ├── history/
+│   │   │   ├── sell/             # POST: registrar venta (legado)
+│   │   │   ├── history/          # GET: historial de ventas paginado
 │   │   │   │   └── manual/       # POST: nueva venta histórica manual
 │   │   │   │       └── [id]/     # DELETE: eliminar venta histórica manual
 │   │   │   ├── import/
 │   │   │   │   └── degiro/       # POST: importar CSV DEGIRO (FormData, maxDuration=300)
 │   │   │   ├── insights/
-│   │   │   │   └── decisions/    # GET: análisis de sesgos psicológicos
+│   │   │   │   └── decisions/    # GET: análisis de sesgos psicológicos (maxDuration=30)
 │   │   │   ├── reset/            # DELETE: limpiar toda la cartera (sin borrar cuenta)
 │   │   │   ├── transactions/     # GET+POST: métricas WAC + registrar BUY/SELL
 │   │   │   └── transactions/[id] # PATCH+DELETE: editar/eliminar transacción
 │   │   ├── market/top-gainers/   # GET: top movers Finnhub
 │   │   ├── macro/flash/          # GET: contexto macro (caché 4h)
-│   │   ├── search/               # GET: búsqueda de tickers
-│   │   └── user/                 # GET/PATCH perfil, contraseña, risk profile
+│   │   ├── search/               # GET: búsqueda de tickers Yahoo Finance
+│   │   └── user/                 # GET/DELETE cuenta
+│   │       ├── profile/          # PATCH: nombre de usuario
+│   │       ├── password/         # PATCH: cambiar contraseña
+│   │       └── risk-profile/     # GET/POST: cuestionario de riesgo
 │   ├── dashboard/                # Panel principal
 │   │   ├── page.tsx              # Home: resumen + P&L no real./real./total + lista de acciones
 │   │   ├── [ticker]/page.tsx     # Detalle: análisis, métricas, noticias, P&L
+│   │   ├── portfolio/page.tsx    # Vista global: todas las posiciones con WAC y métricas agregadas
+│   │   ├── history/page.tsx      # Historial de ventas WAC + ventas manuales + AddManualSellForm
 │   │   ├── simulation/page.tsx   # Monte Carlo + stress tests
 │   │   ├── risk-profile/page.tsx # Cuestionario + resultado de perfil
 │   │   ├── settings/page.tsx     # Ajustes (perfil, contraseña, limpiar cartera, eliminar cuenta)
@@ -257,6 +263,7 @@ src/
 │   ├── macroService.ts           # Contexto macro global (caché Supabase)
 │   ├── earningsService.ts        # Guidance de earnings (caché 30d)
 │   ├── quantitativeService.ts    # Sharpe, Kelly, GARCH, correlaciones, Fear&Greed, PEG Lynch
+│   ├── stockService.ts           # Validación de ticker contra Yahoo Finance antes de añadir
 │   ├── portfolioService.ts       # executeSell (motor de ventas legado), getClosedPerformance
 │   ├── transactionService.ts     # WAC engine: calculatePositionMetrics, addTransaction,
 │   │                             #   getPortfolioMetrics, getTransactionHistory (merge WAC+manual)
@@ -274,15 +281,17 @@ src/
 │   ├── withTimeout.ts            # Promise.race wrapper con clearTimeout en .finally()
 │   ├── cronAuth.ts               # validateCronSecret (timingSafeEqual), isCronAuthorized
 │   ├── finnhubClient.ts          # Cotizaciones en tiempo real
-│   ├── yahooFinanceClient.ts     # Candles históricos + fundamentales
+│   ├── yahooFinanceClient.ts     # Candles históricos + fundamentales + validateTickerExists
 │   ├── newsApiClient.ts          # Artículos de noticias
+│   ├── riskCalculator.ts         # Cálculo de score de riesgo desde respuestas del cuestionario
+│   ├── circuitBreaker.ts         # Circuit breaker para llamadas a APIs externas
 │   ├── portfolioMath.ts          # @deprecated — re-exporta src/lib/math/* (retrocompatibilidad)
 │   ├── math/                     # Módulos matemáticos por responsabilidad
 │   │   ├── index.ts              # Re-exporta todos los módulos
 │   │   ├── returns.ts            # dailyReturns
 │   │   ├── correlation.ts        # pearson, calculateCorrelationMatrix
 │   │   ├── riskMetrics.ts        # (reservado: sharpe, kelly, garch)
-│   │   ├── taxHarvesting.ts      # detectHarvestOpportunities, ETF alternativos
+│   │   ├── taxHarvesting.ts      # detectHarvestOpportunities (umbral $100, excluye precio=0 y qty≤0)
 │   │   ├── optimization/
 │   │   │   ├── markowitz.ts      # runPortfolioOptimization, shrinkCovariance, gradiente
 │   │   │   └── blackLitterman.ts # runBlackLitterman, fallback a markowitz
@@ -299,19 +308,21 @@ src/
     │   ├── AddManualSellForm.tsx      # Formulario venta histórica manual con preview live
     │   ├── DeleteTransactionButton.tsx# Botón eliminar genérico (prop deleteUrl)
     │   ├── ClosedStocksSection.tsx    # Bloque colapsable posiciones cerradas (quantity=0)
-    │   ├── AddStockForm.tsx           # Input de ticker con autocompletado
+    │   ├── AddStockForm.tsx           # Input de ticker con autocompletado + validación Yahoo
     │   ├── UpdateButton.tsx           # Botón de actualización con feedback detallado
     │   ├── StockUpdateMenu.tsx        # Actualización parcial por tipo
     │   ├── CorrelationMatrix.tsx      # Heatmap celdas sólidas data-viz + inline styles DS
-    │   ├── TaxHarvestingPanel.tsx     # Pérdidas latentes + ETF sugeridos por sector
-    │   ├── PortfolioSummary.tsx       # P&L no real.+real.+total · borde RGBA dinámico sesgo
+    │   ├── TaxHarvestingPanel.tsx     # Pérdidas latentes (>$100) + ETF sugeridos por sector
+    │   ├── PortfolioSummary.tsx       # P&L no real.+real.+total · advertencia precios ausentes
     │   ├── PortfolioBenchmark.tsx     # Rendimiento vs benchmark
     │   ├── PortfolioAIInsights.tsx    # Análisis global generado por IA
     │   ├── PriceChart.tsx             # Gráfico de precios históricos
     │   ├── TopMovers.tsx              # Gainers del mercado (badge RGBA verde)
     │   ├── HorizonSelector.tsx        # Selector horizonte (activo: RGBA azul + #93C5FD)
     │   ├── RiskProfileBadge.tsx       # Badge perfil de riesgo en header
-    │   └── RegeneratePortfolioButton.tsx
+    │   ├── LogoutButton.tsx           # Botón de cierre de sesión
+    │   ├── RemoveStockButton.tsx      # Botón eliminar acción del dashboard
+    │   └── RegeneratePortfolioButton.tsx # Regenerar análisis global de cartera
     └── ui/
         ├── RiskBadge.tsx              # Badge riesgo semi-transparente verde/amber/rojo
         └── Disclaimer.tsx             # Aviso legal muted ℹ
