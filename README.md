@@ -51,7 +51,7 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 - **Stress Testing histórico** — 5 escenarios: Crisis 2008 (-56.5%, 356d), COVID 2020 (-34%, 33d), Subida tipos 2022 (-25.5%, 282d), Punto com 2000 (-49.1%, 638d), Lunes negro 1987 (-33.6%, 101d); calcula pérdida total, valor final y días estimados de recuperación
 - **Optimización Black-Litterman** — Prior de equilibrio de mercado + vistas de retorno esperado generadas por Gemini + combinación bayesiana (τ=0.05, δ=2.5); fallback a Markowitz si matriz singular o sin vistas
 - **Markowitz (Varianza Mínima)** — Gradiente descendente (3 000 pasos), sin posiciones cortas, shrinkage de Ledoit-Wolf simplificada (α=0.2)
-- **Tax Harvesting** — Detecta posiciones con pérdida latente > $100 y sugiere ETF alternativo por sector (QQQ para tech, XLF para finanzas, XLE para energía, etc.)
+- **Tax Harvesting** — Panel en el dashboard con dos secciones diferenciadas para el año fiscal en curso: (1) **Pérdidas confirmadas** — ventas ya ejecutadas con pérdida (`profitAmount < 0`), deducibles sin ninguna acción adicional, con badge "Confirmada" y total compensable; (2) **Pérdidas latentes realizables** — posiciones abiertas con pérdida > $100 y alternativa ETF por sector sugerida (QQQ para tech, XLF para finanzas, XLE para energía, etc.). Si existen ambas, muestra el potencial total combinado. Las posiciones con precio $0 o quantity ≤ 0 se excluyen del cálculo para evitar falsas alertas. Incluye referencia al art. 33 LIRPF (prohibición de recompra en 2 meses)
 - **Rebalanceo de cartera** — Calcula trades necesarios para alcanzar pesos objetivo con detección de oportunidades de tax harvesting integrada
 
 ### Perfil de riesgo
@@ -312,7 +312,7 @@ src/
     │   ├── UpdateButton.tsx           # Botón de actualización con feedback detallado
     │   ├── StockUpdateMenu.tsx        # Actualización parcial por tipo
     │   ├── CorrelationMatrix.tsx      # Heatmap celdas sólidas data-viz + inline styles DS
-    │   ├── TaxHarvestingPanel.tsx     # Pérdidas latentes (>$100) + ETF sugeridos por sector
+    │   ├── TaxHarvestingPanel.tsx     # Pérdidas confirmadas año fiscal + latentes (>$100) + ETF
     │   ├── PortfolioSummary.tsx       # P&L no real.+real.+total · advertencia precios ausentes
     │   ├── PortfolioBenchmark.tsx     # Rendimiento vs benchmark
     │   ├── PortfolioAIInsights.tsx    # Análisis global generado por IA
