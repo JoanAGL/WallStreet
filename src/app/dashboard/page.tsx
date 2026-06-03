@@ -41,13 +41,16 @@ export default async function DashboardPage() {
     (e) => e.profitAmount < 0 && new Date(e.date).getFullYear() === currentYear
   );
 
+  const openStocks     = stocks.filter((s) => s.quantity != null && s.quantity > 0);
+  const historicStocks = stocks.filter((s) => s.quantity == null || s.quantity <= 0);
+
   const lastUpdatedAt = stocks
     .map((s) => s.analysis?.updatedAt)
     .filter(Boolean)
     .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())[0]
     ?.toISOString() ?? null;
 
-  const stocksWithAnalysis = stocks.filter((s) => s.analysis).length;
+  const stocksWithAnalysis = openStocks.filter((s) => s.analysis).length;
 
   return (
     <div className="space-y-6">
@@ -57,7 +60,15 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Mis acciones</h1>
           <p className="text-sm text-gray-500">
-            {stocks.length} / 20 acciones añadidas
+            {openStocks.length} posiciones abiertas
+            {historicStocks.length > 0 && (
+              <span style={{ color: "var(--fg-5)", marginLeft: 6 }}>
+                · {historicStocks.length} históricas en{" "}
+                <a href="/dashboard/history" style={{ color: "var(--accent)", textDecoration: "underline" }}>
+                  Historial
+                </a>
+              </span>
+            )}
           </p>
         </div>
         <UpdateButton lastUpdatedAt={lastUpdatedAt} />
@@ -88,16 +99,18 @@ export default async function DashboardPage() {
 
       <TopMovers />
 
-      {stocks.length === 0 ? (
+      {openStocks.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-4xl mb-3">📈</p>
           <p className="text-sm">
-            No tienes acciones añadidas. Añade hasta 20 para ver el análisis.
+            {historicStocks.length > 0
+              ? `Tienes ${historicStocks.length} acciones históricas sin posición abierta. Añade una acción activa o consulta el Historial.`
+              : "No tienes acciones añadidas. Añade hasta 20 para ver el análisis."}
           </p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
-          {stocks.map((stock) => (
+          {openStocks.map((stock) => (
             <StockCard key={stock.id} stock={stock} />
           ))}
         </div>
