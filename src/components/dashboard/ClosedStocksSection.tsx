@@ -44,7 +44,7 @@ export default function ClosedStocksSection({ stocks }: Props) {
         >
           <p style={{ gridColumn: "1 / -1", margin: "0 0 4px", fontSize: 12, color: "var(--fg-5)" }}>
             Estas posiciones tienen saldo cero — aparecen por transacciones históricas importadas.
-            Se actualizan con el botón "Actualizar" igual que las activas.
+            Se actualizan con el botón &quot;Actualizar&quot; igual que las activas.
           </p>
           {stocks.map((stock) => (
             <div key={stock.id} style={{ position: "relative" }}>
