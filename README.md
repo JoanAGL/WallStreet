@@ -70,6 +70,62 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 - **Historial de ventas** — `/dashboard/history` muestra cada transacción SELL ejecutada con el precio medio WAC en el momento de la venta, precio de venta, profit en $ y %, capital invertido y recaudado por operación. `getTransactionHistory()` en `transactionService` recalcula el WAC cronológico para cada venta y extrae el profit individual real. Fusiona automáticamente entradas de `Transaction` (origen `"transaction"`) con entradas manuales de `ManualSellEntry` (origen `"manual"`), ordenadas por fecha descendente. Cada entrada se puede eliminar individualmente; las de tipo `transaction` recalculan el WAC automáticamente. Agrega capital total invertido, recaudado, profit absoluto y ROI global
 - **Ventas históricas manuales** — Formulario en `/dashboard/history` para registrar posiciones compradas y vendidas antes de usar el sistema: ticker libre (no necesita estar en el dashboard), número de acciones, precio medio de compra, precio de venta, fecha y notas opcionales. Preview en tiempo real de invertido / recaudado / profit / ROI antes de guardar. Almacenadas en `ManualSellEntry` con relación directa a `User` (sin Stock). API: `POST /api/portfolio/history/manual` y `DELETE /api/portfolio/history/manual/[id]`. Aparecen en el historial con badge «manual» para distinguirlas de las que vienen del TransactionPanel
 - **Vista global de rendimiento** — `/dashboard/portfolio` muestra todas las posiciones con transacciones, agregados globales (valor actual total, coste base total, PnL no realizado + %, PnL realizado, PnL total) y detalle por posición con todas las métricas; accesible desde «Rendimiento →» en el resumen de cartera
+- **P&L en resumen de cartera** — `PortfolioSummary` muestra tres métricas P&L en el dashboard principal: **No realizado** (posiciones abiertas: valor actual − coste base WAC, con %), **Realizado** (beneficios de ventas ejecutadas, sumado desde `getPortfolioMetrics`) y **Total combinado** (suma de ambos, con %). Realizado y Total solo aparecen cuando hay operaciones cerradas
+- **Gestión de posiciones cerradas** — stocks con `quantity = 0` (totalmente vendidos, importados de DEGIRO) se excluyen del dashboard activo y aparecen en un bloque colapsable "Posiciones cerradas (N) ▼" al final. El botón "Actualizar datos" no lanza análisis IA ni NewsAPI en posiciones cerradas (evita consumo de API innecesario)
+- **Limpiar cartera** — en Ajustes → "Limpiar cartera", borrado completo de stocks, transacciones, ventas manuales y análisis IA sin eliminar la cuenta. Requiere escribir `LIMPIAR` para confirmar. `DELETE /api/portfolio/reset` en cascada: `ManualSellEntry` → `PortfolioAnalysis` → `Stock` (que arrastra `Transaction`, `StockAnalysis`, `StockAnalysisHistory`, `ClosedOperation`)
+- **Registro de último acceso** — `User.lastLogin DateTime?` se actualiza en cada login exitoso vía `prisma.user.update` fire-and-forget en el callback `authorize` de NextAuth (no bloquea la respuesta de autenticación)
+
+### Módulo de Importación Masiva (DEGIRO por ISIN)
+
+Importa automáticamente el historial completo de transacciones desde el broker DEGIRO sin introducción manual de datos. Los tickers se resuelven dinámicamente desde Yahoo Finance usando el ISIN como clave maestra — nunca se procesa el texto del campo `Producto`.
+
+**Flujo de importación:**
+1. Exportar desde DEGIRO → Actividad → Transacciones (rango libre) como `.csv`
+2. Arrastrar el archivo a `/dashboard/import` o seleccionarlo con el selector
+3. El servidor procesa el CSV, resuelve tickers vía Yahoo Finance y actualiza el WAC
+
+**Parser CSV ultra-defensivo:**
+- **BOM** — elimina el Byte Order Mark UTF-8 del inicio del archivo
+- **Cabeceras vacías** — el patrón `Precio,,Valor local,,Valor EUR` (columnas de divisa sin nombre) se filtra al construir el mapa de columnas
+- **Decimales europeos** — `"209,5000"` → `.replace(',', '.')` antes de `parseFloat`
+- **Orden inverso** — DEGIRO exporta del más nuevo al más antiguo; el importer invierte el array para procesar en orden cronológico real (necesario para que el WAC sea correcto)
+- **Ejecuciones parciales** — DEGIRO divide órdenes grandes en múltiples filas con el mismo ID Orden y distintos centros de ejecución. El importer agrupa por `orderId|isin|tipo` y fusiona: `shares = Σ|numero_i|`, `precio = WAC ponderado en USD`. Las filas sin ID Orden se procesan individualmente
+- **Conversión EUR → USD** — lee la divisa del precio desde la columna sin nombre en `col["precio"] + 1` y el tipo de cambio desde la columna `Tipo de cambio`. La conversión `precio × fxRate` ocurre en tiempo de parsing, antes de la fusión de ejecuciones parciales
+- **Deduplicación** — carga todas las transacciones existentes en un `Set` en memoria; las filas que ya existen en la BD (mismo stock, tipo, acciones, precio, fecha) se omiten → seguro reimportar el mismo archivo varias veces
+
+**Resolución de tickers por ISIN:**
+- Para cada ISIN único: `GET https://query2.finance.yahoo.com/v1/finance/search?q={ISIN}` con headers `User-Agent`
+- Preferencia: resultados `EQUITY` o `ETF`; devuelve `symbol` (ticker oficial) y `longname`
+- Timeout de 4 s por ISIN (AbortController + clearTimeout en finally)
+- Lotes de 8 ISINs en paralelo con pausa de 100 ms entre lotes (~15 ISINs ≈ 2 lotes ≈ 1-2 s total)
+- ISINs no resueltos: fallback al campo `Producto` limpio (primeros 8 chars alfanuméricos); reportados en `isinsFailed[]` de la respuesta
+
+**Campos añadidos al modelo `Stock`:**
+- `isin String?` — identificador ISIN para deduplicación entre brokers/mercados
+- `name String?` — nombre completo del producto (ej. `"Apple Inc"`, `"iShares Core MSCI World..."`)
+
+**API:** `POST /api/portfolio/import/degiro` — recibe `FormData` con campo `file` (CSV ≤ 10 MB). Devuelve `{ imported, skipped, stocksCreated, isinsFailed }`. `maxDuration = 300` (efectivo en Vercel Pro; Hobby tiene hard-cap de 10 s).
+
+### Motor de Psicología Financiera e Insights de Inversión
+
+Dashboard analítico en `/dashboard/insights` que evalúa la calidad histórica de las decisiones de inversión mediante métricas de comportamiento financiero calculadas sobre el historial de transacciones.
+
+**Métricas calculadas (`src/services/decisionAnalysisService.ts`):**
+
+| Métrica | Descripción | Señal de sesgo |
+|---------|-------------|----------------|
+| **Efecto Disposición** | Días medios de retención en posiciones ganadoras vs perdedoras | Sesgo si `avgDaysLosers > avgDaysWinners × 1.3` con ≥ 2 operaciones de cada tipo |
+| **Profit Factor** | Σganancias cerradas / Σpérdidas cerradas | ≥ 2 = excelente · 1–2 = positivo · < 1 = pérdidas > ganancias |
+| **Ventas Prematuras** | Precio de venta histórico vs precio actual de mercado (Yahoo Finance live) | Alerta si el activo ha subido > 10% desde la venta y < 5× (ratio > 5× descartado = ticker erróneo) |
+| **Benchmark S&P 500** | Simula qué habría rendido en SPY el mismo capital invertido en cada operación cerrada | Alpha = retorno cartera − retorno SPY simulado |
+
+**Cálculo del Benchmark S&P 500:**
+- Para cada operación cerrada (`trade`): `investedUSD = trade.avgCost × trade.shares` (capital real arriesgado), `entryDate = trade.firstBuyDate`
+- Simula: `spyShares = investedUSD / SPY_price(entryDate)` → `value_today = spyShares × SPY_NOW`
+- `SPY_NOW` se obtiene en cada llamada vía `fetchCurrentPrice("SPY")` con fallback a tabla histórica interpolada (precios reales SPY 2014-2026)
+- Solo usa operaciones cerradas (excluye posiciones abiertas) → "Capital analizado" = capital efectivamente comprado y vendido
+
+**API:** `GET /api/portfolio/insights/decisions` — análisis completo de sesgos en JSON. `maxDuration = 30`.
 
 ### Diseño visual
 
@@ -122,6 +178,7 @@ Tema oscuro fintech inspirado en MyInvestor / DeGiro, implementado mediante un d
 - **Paralelismo en el pipeline** — Fetch de macro y artículos de noticias se lanzan en paralelo (independientes); sentimiento batch y earnings también en paralelo (tras recibir artículos)
 - **Validación CRON_SECRET resistente a timing attacks** — `crypto.timingSafeEqual` + SHA-256 en ambos lados; la comparación tarda tiempo constante independientemente del secreto enviado
 - **System instruction estática** — `STATIC_SYSTEM_INSTRUCTION` se define una vez a nivel de módulo; el contexto dinámico (macro, earnings, riskProfile) va en el mensaje de usuario como JSON compacto, permitiendo que el prefijo del sistema se almacene en la caché KV implícita de Gemini y reduciendo el coste de tokens de entrada en cada llamada batch
+- **Row-Level Security (RLS)** — Todas las tablas del esquema público en Supabase tienen RLS habilitado (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY`). Esto bloquea el acceso anónimo vía la API REST de Supabase (rol `anon`/`authenticated`) sin afectar a Prisma, que conecta directamente con PostgreSQL usando `service_role` (bypasea RLS por diseño)
 
 ---
 
@@ -166,6 +223,11 @@ src/
 │   │   │   ├── history/
 │   │   │   │   └── manual/       # POST: nueva venta histórica manual
 │   │   │   │       └── [id]/     # DELETE: eliminar venta histórica manual
+│   │   │   ├── import/
+│   │   │   │   └── degiro/       # POST: importar CSV DEGIRO (FormData, maxDuration=300)
+│   │   │   ├── insights/
+│   │   │   │   └── decisions/    # GET: análisis de sesgos psicológicos
+│   │   │   ├── reset/            # DELETE: limpiar toda la cartera (sin borrar cuenta)
 │   │   │   ├── transactions/     # GET+POST: métricas WAC + registrar BUY/SELL
 │   │   │   └── transactions/[id] # PATCH+DELETE: editar/eliminar transacción
 │   │   ├── market/top-gainers/   # GET: top movers Finnhub
@@ -173,14 +235,20 @@ src/
 │   │   ├── search/               # GET: búsqueda de tickers
 │   │   └── user/                 # GET/PATCH perfil, contraseña, risk profile
 │   ├── dashboard/                # Panel principal
-│   │   ├── page.tsx              # Home: resumen + lista de acciones
+│   │   ├── page.tsx              # Home: resumen + P&L no real./real./total + lista de acciones
 │   │   ├── [ticker]/page.tsx     # Detalle: análisis, métricas, noticias, P&L
 │   │   ├── simulation/page.tsx   # Monte Carlo + stress tests
 │   │   ├── risk-profile/page.tsx # Cuestionario + resultado de perfil
-│   │   ├── settings/page.tsx     # Ajustes de cuenta
-│   │   └── help/page.tsx         # Documentación de uso
+│   │   ├── settings/page.tsx     # Ajustes (perfil, contraseña, limpiar cartera, eliminar cuenta)
+│   │   ├── help/page.tsx         # Documentación de uso
+│   │   ├── import/page.tsx       # Drag & Drop importación CSV DEGIRO
+│   │   └── insights/page.tsx     # Dashboard de sesgos y análisis de decisiones
 │   └── (auth)/                   # Login + registro
 ├── services/                     # Lógica de negocio
+│   ├── importService.ts          # Parser CSV DEGIRO: BOM, ejecuciones parciales, EUR→USD,
+│   │                             #   resolución ISIN→ticker via Yahoo Finance, createMany sin tx
+│   ├── decisionAnalysisService.ts# Sesgos: efecto disposición, profit factor, ventas prematuras,
+│   │                             #   benchmark S&P 500 (SPY live + histórico interpolado)
 │   ├── analysisOrchestrator.ts   # Pipeline principal multi-fase
 │   ├── aiAnalysisService.ts      # Análisis multi-horizonte + batch Gemini
 │   ├── technicalAnalysisService.ts # SMA, RSI, RSISeries, ATR, RelVol, Hurst, divergencia precio/RSI
@@ -230,12 +298,13 @@ src/
     │   ├── TransactionPanel.tsx       # Panel plegable BUY/SELL WAC por acción
     │   ├── AddManualSellForm.tsx      # Formulario venta histórica manual con preview live
     │   ├── DeleteTransactionButton.tsx# Botón eliminar genérico (prop deleteUrl)
+    │   ├── ClosedStocksSection.tsx    # Bloque colapsable posiciones cerradas (quantity=0)
     │   ├── AddStockForm.tsx           # Input de ticker con autocompletado
     │   ├── UpdateButton.tsx           # Botón de actualización con feedback detallado
     │   ├── StockUpdateMenu.tsx        # Actualización parcial por tipo
     │   ├── CorrelationMatrix.tsx      # Heatmap celdas sólidas data-viz + inline styles DS
     │   ├── TaxHarvestingPanel.tsx     # Pérdidas latentes + ETF sugeridos por sector
-    │   ├── PortfolioSummary.tsx       # Resumen con borde RGBA dinámico según sesgo cartera
+    │   ├── PortfolioSummary.tsx       # P&L no real.+real.+total · borde RGBA dinámico sesgo
     │   ├── PortfolioBenchmark.tsx     # Rendimiento vs benchmark
     │   ├── PortfolioAIInsights.tsx    # Análisis global generado por IA
     │   ├── PriceChart.tsx             # Gráfico de precios históricos
