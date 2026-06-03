@@ -217,8 +217,8 @@ function DecisionCard({ entry, rank }: { entry: DecisionEntry; rank: number }) {
         </div>
       </div>
       <div style={{ textAlign: "right", flexShrink: 0 }}>
-        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: isPos ? "#4ADE80" : "#F87171" }}>{isPos ? "+" : ""}{fmtUSD(entry.profitAmt)}</p>
-        <p style={{ margin: 0, fontSize: 11, color: isPos ? "#4ADE80" : "#F87171" }}>{isPos ? "+" : ""}{entry.profitPct.toFixed(2)}%</p>
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: isPos ? "#4ADE80" : "#F87171" }}>{isPos ? "+" : "-"}{fmtUSD(entry.profitAmt)}</p>
+        <p style={{ margin: 0, fontSize: 11, color: isPos ? "#4ADE80" : "#F87171" }}>{isPos ? "+" : "-"}{Math.abs(entry.profitPct).toFixed(2)}%</p>
       </div>
     </div>
   );

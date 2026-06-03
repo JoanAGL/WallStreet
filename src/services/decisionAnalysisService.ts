@@ -203,7 +203,10 @@ export async function getDecisionAnalysis(userId: string): Promise<DecisionAnaly
       curPrice = ticker ? await fetchCurrentPrice(ticker) : null;
       priceCache.set(trade.stockId, curPrice);
     }
+    // Skip if no price, not a >10% gain, or price is >5× sell price
+    // (>5× almost certainly means the resolved ticker is wrong — different company)
     if (!curPrice || curPrice <= trade.sellPrice * 1.1) continue;
+    if (curPrice > trade.sellPrice * 5) continue;
     const missed    = Math.round((curPrice - trade.sellPrice) * trade.shares * 100) / 100;
     const missedPct = Math.round(((curPrice - trade.sellPrice) / trade.sellPrice) * 10000) / 100;
     prematureSales.push({
