@@ -3,6 +3,8 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getStocksWithAnalysis } from "@/repositories/stockRepository";
 import { getPortfolioAnalysis } from "@/repositories/portfolioAnalysisRepository";
+import { getPortfolioMetrics } from "@/services/transactionService";
+import { prisma } from "@/lib/prisma";
 import StockCard from "@/components/dashboard/StockCard";
 import AddStockForm from "@/components/dashboard/AddStockForm";
 import UpdateButton from "@/components/dashboard/UpdateButton";
@@ -20,9 +22,17 @@ export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
-  const [stocks, portfolioAnalysis] = await Promise.all([
+  const [stocks, portfolioAnalysis, portfolioMetrics] = await Promise.all([
     getStocksWithAnalysis(session.user.id),
     getPortfolioAnalysis(session.user.id),
+    prisma.stockAnalysis.findMany({
+      where:  { stock: { userId: session.user.id } },
+      select: { stockId: true, price: true },
+    }).then(async (analyses) => {
+      const currentPrices: Record<string, number> = {};
+      for (const a of analyses) currentPrices[a.stockId] = a.price;
+      return getPortfolioMetrics(session.user.id, currentPrices);
+    }),
   ]);
 
   const lastUpdatedAt = stocks
@@ -47,7 +57,7 @@ export default async function DashboardPage() {
         <UpdateButton lastUpdatedAt={lastUpdatedAt} />
       </div>
 
-      <PortfolioSummary stocks={stocks} />
+      <PortfolioSummary stocks={stocks} realizedPnL={portfolioMetrics.totalRealizedPnL} />
 
       <PortfolioBenchmark stocks={stocks} />
 

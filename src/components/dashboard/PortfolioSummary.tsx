@@ -4,7 +4,8 @@ import type { StockWithAnalysis } from "@/types/models";
 import type { AllHorizonsAIAnalysis } from "@/services/aiAnalysisService";
 
 interface Props {
-  stocks: StockWithAnalysis[];
+  stocks:      StockWithAnalysis[];
+  realizedPnL: number;
 }
 
 function getActiveScenario(stock: StockWithAnalysis): "Positivo" | "Neutral" | "Negativo" {
@@ -31,7 +32,7 @@ function fmtMoney(n: number): string {
   return n.toLocaleString("es-ES", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
 }
 
-export default function PortfolioSummary({ stocks }: Props) {
+export default function PortfolioSummary({ stocks, realizedPnL }: Props) {
   const withAnalysis = stocks.filter((s) => s.analysis);
   if (withAnalysis.length < 2) return null;
 
@@ -113,21 +114,61 @@ export default function PortfolioSummary({ stocks }: Props) {
 
       {/* Aggregate P&L */}
       {totalPnl != null && (
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, paddingTop: 6, borderTop: "1px solid var(--card-border-inner)", fontSize: 12 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16, paddingTop: 6, borderTop: "1px solid var(--card-border-inner)", fontSize: 12 }}>
           <span style={{ color: "var(--fg-5)" }}>
             Invertido: <span style={{ fontWeight: 500, color: "var(--fg-3)" }}>{fmtMoney(totalCost)}</span>
           </span>
           <span style={{ color: "var(--fg-5)" }}>
             Valor: <span style={{ fontWeight: 500, color: "var(--fg-3)" }}>{fmtMoney(totalValue)}</span>
           </span>
-          <span style={{ fontWeight: 600, color: totalPnl >= 0 ? "#4ADE80" : "#F87171" }}>
-            P&L: {totalPnl >= 0 ? "+" : ""}{fmtMoney(totalPnl)}
-            {totalPnlPct != null && (
-              <span style={{ fontWeight: 400, marginLeft: 4 }}>
-                ({totalPnlPct >= 0 ? "+" : ""}{totalPnlPct.toFixed(2)}%)
-              </span>
-            )}
+
+          <span style={{ color: "var(--fg-5)" }}>·</span>
+
+          {/* Unrealized P&L */}
+          <span style={{ color: "var(--fg-5)" }}>
+            No realizado:{" "}
+            <span style={{ fontWeight: 600, color: totalPnl >= 0 ? "#4ADE80" : "#F87171" }}>
+              {totalPnl >= 0 ? "+" : ""}{fmtMoney(totalPnl)}
+              {totalPnlPct != null && (
+                <span style={{ fontWeight: 400, marginLeft: 4 }}>
+                  ({totalPnlPct >= 0 ? "+" : ""}{totalPnlPct.toFixed(2)}%)
+                </span>
+              )}
+            </span>
           </span>
+
+          {/* Realized P&L — only when non-zero */}
+          {realizedPnL !== 0 && (
+            <span style={{ color: "var(--fg-5)" }}>
+              Realizado:{" "}
+              <span style={{ fontWeight: 600, color: realizedPnL >= 0 ? "#4ADE80" : "#F87171" }}>
+                {realizedPnL >= 0 ? "+" : ""}{fmtMoney(realizedPnL)}
+              </span>
+            </span>
+          )}
+
+          {/* Combined total — only when realized P&L exists */}
+          {realizedPnL !== 0 && (() => {
+            const combined    = totalPnl + realizedPnL;
+            const combinedPct = totalCost > 0 ? (combined / totalCost) * 100 : null;
+            return (
+              <>
+                <span style={{ color: "var(--fg-5)" }}>·</span>
+                <span style={{ color: "var(--fg-5)" }}>
+                  Total:{" "}
+                  <span style={{ fontWeight: 700, color: combined >= 0 ? "#4ADE80" : "#F87171" }}>
+                    {combined >= 0 ? "+" : ""}{fmtMoney(combined)}
+                    {combinedPct != null && (
+                      <span style={{ fontWeight: 400, marginLeft: 4 }}>
+                        ({combinedPct >= 0 ? "+" : ""}{combinedPct.toFixed(2)}%)
+                      </span>
+                    )}
+                  </span>
+                </span>
+              </>
+            );
+          })()}
+
           {withPosition.length < withAnalysis.length && (
             <span style={{ color: "var(--fg-5)", fontStyle: "italic" }}>
               · {withPosition.length}/{withAnalysis.length} posiciones
