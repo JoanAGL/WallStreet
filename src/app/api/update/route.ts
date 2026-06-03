@@ -67,9 +67,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No tienes acciones añadidas." }, { status: 400 });
   }
 
+  // Exclude fully-sold stocks (quantity === 0, set by the DEGIRO importer) from
+  // the analysis pipeline. AI + news calls on closed positions waste API quota.
+  const activeStocks = allStocks.filter((s) => s.quantity !== 0);
+
   const stocks = requestedTickers
-    ? allStocks.filter((s) => requestedTickers.includes(s.ticker))
-    : allStocks;
+    ? activeStocks.filter((s) => requestedTickers.includes(s.ticker))
+    : activeStocks;
 
   if (stocks.length === 0) {
     return NextResponse.json({ error: "Ninguna de las acciones indicadas está en tu lista." }, { status: 400 });
