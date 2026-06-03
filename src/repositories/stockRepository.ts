@@ -7,6 +7,8 @@ export type PrismaStock = {
   id: string;
   ticker: string;
   userId: string;
+  isin: string | null;
+  name: string | null;
   investmentHorizon: InvestmentHorizon;
   purchasePrice: number | null;
   purchaseDate: Date | null;
@@ -109,4 +111,13 @@ export async function removeStock(ticker: string, userId: string): Promise<void>
   await prisma.stock.delete({
     where: { ticker_userId: { ticker, userId } },
   });
+}
+
+export async function findStockByIsinAndUser(
+  isin: string,
+  userId: string
+): Promise<PrismaStock | null> {
+  return prisma.stock.findFirst({
+    where: { isin, userId },
+  }) as unknown as PrismaStock | null;
 }

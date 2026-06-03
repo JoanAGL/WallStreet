@@ -51,6 +51,8 @@ model Stock {
   id                String            @id @default(cuid())
   ticker            String
   userId            String
+  isin              String?
+  name              String?
   investmentHorizon InvestmentHorizon @default(SHORT_TERM)
   purchasePrice     Float?
   purchaseDate      DateTime?
