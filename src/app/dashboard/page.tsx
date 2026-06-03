@@ -3,7 +3,7 @@ import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { getStocksWithAnalysis } from "@/repositories/stockRepository";
 import { getPortfolioAnalysis } from "@/repositories/portfolioAnalysisRepository";
-import { getPortfolioMetrics } from "@/services/transactionService";
+import { getPortfolioMetrics, getTransactionHistory } from "@/services/transactionService";
 import { prisma } from "@/lib/prisma";
 import StockCard from "@/components/dashboard/StockCard";
 import AddStockForm from "@/components/dashboard/AddStockForm";
@@ -22,7 +22,7 @@ export default async function DashboardPage() {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
-  const [stocks, portfolioAnalysis, portfolioMetrics] = await Promise.all([
+  const [stocks, portfolioAnalysis, portfolioMetrics, sellHistory] = await Promise.all([
     getStocksWithAnalysis(session.user.id),
     getPortfolioAnalysis(session.user.id),
     prisma.stockAnalysis.findMany({
@@ -33,7 +33,13 @@ export default async function DashboardPage() {
       for (const a of analyses) currentPrices[a.stockId] = a.price;
       return getPortfolioMetrics(session.user.id, currentPrices);
     }),
+    getTransactionHistory(session.user.id),
   ]);
+
+  const currentYear    = new Date().getFullYear();
+  const realizedLosses = sellHistory.entries.filter(
+    (e) => e.profitAmount < 0 && new Date(e.date).getFullYear() === currentYear
+  );
 
   const lastUpdatedAt = stocks
     .map((s) => s.analysis?.updatedAt)
@@ -61,7 +67,7 @@ export default async function DashboardPage() {
 
       <PortfolioBenchmark stocks={stocks} />
 
-      <TaxHarvestingPanel stocks={stocks} />
+      <TaxHarvestingPanel stocks={stocks} realizedLosses={realizedLosses} />
 
       {stocksWithAnalysis >= 2 && <CorrelationMatrix />}
 
