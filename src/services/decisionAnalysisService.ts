@@ -83,16 +83,14 @@ export async function getDecisionAnalysis(userId: string): Promise<DecisionAnaly
 
   const stocks = await prisma.stock.findMany({
     where:  { userId },
-    select: { id: true, ticker: true },
-    include: { analysis: { select: { price: true } } },
-  } as Parameters<typeof prisma.stock.findMany>[0]);
+    select: { id: true, ticker: true, analysis: { select: { price: true } } },
+  });
 
   const tickerMap    = new Map<string, string>();
   const currentPrice = new Map<string, number>();
   for (const s of stocks) {
-    tickerMap.set(s.id, (s as { id: string; ticker: string }).ticker);
-    const sa = (s as { analysis?: { price: number } | null }).analysis;
-    if (sa?.price) currentPrice.set(s.id, sa.price);
+    tickerMap.set(s.id, s.ticker);
+    if (s.analysis?.price) currentPrice.set(s.id, s.analysis.price);
   }
 
   // Group transactions by stock
