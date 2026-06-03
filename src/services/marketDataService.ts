@@ -63,7 +63,10 @@ export async function getCurrentQuote(ticker: string): Promise<CurrentQuote> {
   // devuelve c:0 — en ese caso usar Yahoo Finance como fallback.
   if (!quote.c || quote.c <= 0) {
     const yahooQuote = await getQuoteFromYahoo(ticker);
-    if (yahooQuote) return yahooQuote;
+    if (yahooQuote) {
+      console.log(`[getCurrentQuote] Finnhub miss for ${ticker} — using Yahoo fallback: ${yahooQuote.price}`);
+      return yahooQuote;
+    }
     throw new Error(`No se encontraron datos de precio para: ${ticker}`);
   }
 

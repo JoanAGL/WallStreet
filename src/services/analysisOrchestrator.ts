@@ -597,6 +597,7 @@ async function runPartialForStock(
 
 function isFresh(analysis: StockAnalysisModel | null, force: boolean): boolean {
   if (force || !analysis) return false;
+  if (analysis.price === 0 || analysis.price == null) return false;
   return Date.now() - new Date(analysis.updatedAt).getTime() < CACHE_TTL_MS;
 }
 
