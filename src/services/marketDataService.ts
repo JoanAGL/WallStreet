@@ -23,16 +23,37 @@ export interface HistoricalData {
 
 async function getQuoteFromYahoo(ticker: string): Promise<CurrentQuote | null> {
   try {
-    const [candles, currency] = await Promise.all([
-      fetchYahooCandles(ticker, 5),
-      fetchTickerCurrency(ticker),
-    ]);
-    if (!candles.closes.length) return null;
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=5d&includePrePost=false`;
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept":          "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      next: { revalidate: 0 },
+    });
+    if (!res.ok) return null;
 
-    const price     = candles.closes[candles.closes.length - 1];
-    const prevClose = candles.closes.length > 1
-      ? candles.closes[candles.closes.length - 2]
-      : price;
+    const data = await res.json() as {
+      chart: {
+        result: [{
+          meta: { currency: string; regularMarketPrice: number; previousClose: number; chartPreviousClose: number };
+          indicators: { quote: [{ close: (number | null)[] }] };
+        }] | null;
+        error: unknown;
+      };
+    };
+
+    if (data.chart.error || !data.chart.result?.[0]) return null;
+
+    const result   = data.chart.result[0];
+    const meta     = result.meta;
+    const currency = meta.currency ?? "USD";
+
+    const closes    = result.indicators.quote[0]?.close ?? [];
+    const lastClose = [...closes].reverse().find((c) => c != null && c > 0);
+    const price     = meta.regularMarketPrice > 0 ? meta.regularMarketPrice : (lastClose ?? 0);
+    const prevClose = meta.previousClose > 0 ? meta.previousClose : (meta.chartPreviousClose ?? price);
 
     if (!price || price <= 0) return null;
 
@@ -43,7 +64,7 @@ async function getQuoteFromYahoo(ticker: string): Promise<CurrentQuote | null> {
 
     let priceUSD = price;
     if (currency !== "USD") {
-      const fxRate = await fetchEURUSD();
+      const fxRate = await fetchEURUSD().catch(() => 1.10);
       priceUSD = Math.round(price * fxRate * 10000) / 10000;
     }
 
@@ -54,33 +75,24 @@ async function getQuoteFromYahoo(ticker: string): Promise<CurrentQuote | null> {
 }
 
 export async function getCurrentQuote(ticker: string): Promise<CurrentQuote> {
-  const [quote, currency] = await Promise.all([
-    fetchQuote(ticker),
-    fetchTickerCurrency(ticker),
-  ]);
+  const quote = await fetchQuote(ticker);
 
-  // Finnhub cubre NYSE/NASDAQ. Para acciones europeas (SAB.MC, NOVO-B.CO, etc.)
-  // devuelve c:0 — en ese caso usar Yahoo Finance como fallback.
+  // Finnhub no cubre acciones europeas — devuelve c:0 para SAB.MC, NOVO-B.CO, etc.
   if (!quote.c || quote.c <= 0) {
     const yahooQuote = await getQuoteFromYahoo(ticker);
     if (yahooQuote) {
-      console.log(`[getCurrentQuote] Finnhub miss for ${ticker} — using Yahoo fallback: ${yahooQuote.price}`);
+      console.log(`[getCurrentQuote] Yahoo OK for ${ticker}: ${yahooQuote.price} ${yahooQuote.currency}`);
       return yahooQuote;
     }
-    throw new Error(`No se encontraron datos de precio para: ${ticker}`);
+    throw new Error(`Sin datos de precio para: ${ticker}`);
   }
 
-  let priceUSD = quote.c;
-  if (currency !== "USD") {
-    const fxRate = await fetchEURUSD();
-    priceUSD = Math.round(quote.c * fxRate * 10000) / 10000;
-  }
-
+  // Ticker americano con precio Finnhub válido — siempre USD
   return {
     ticker,
     price:         quote.c,
-    priceUSD,
-    currency,
+    priceUSD:      quote.c,
+    currency:      "USD",
     previousClose: quote.pc,
     change:        quote.d,
     changePercent: quote.dp,

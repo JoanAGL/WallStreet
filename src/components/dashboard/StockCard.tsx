@@ -176,21 +176,28 @@ export default function StockCard({ stock }: Props) {
             <h3 className="text-lg font-bold text-gray-900">{stock.ticker}</h3>
             <span className="text-xs text-gray-400 font-medium">{HORIZON_LABELS[horizon]}</span>
           </div>
-          {a && (
-            <p className="text-2xl font-semibold text-gray-800 mt-0.5">
-              {a.currency === "EUR" ? "€" : "$"}{fmt(a.price)}
-              {a.currency !== "USD" && a.priceUSD != null && (
-                <span style={{ fontSize: 13, fontWeight: 400, color: "var(--fg-5)", marginLeft: 5 }}>
-                  (~${fmt(a.priceUSD)})
+          {a && (() => {
+            const currencySymbol = a.currency === "EUR" ? "€" : a.currency === "GBP" ? "£" : "$";
+            const priceDisplay   = `${currencySymbol}${a.price.toFixed(2)}`;
+            const priceUSDNote   = a.currency !== "USD" && a.priceUSD
+              ? `(~$${a.priceUSD.toFixed(2)})`
+              : "";
+            return (
+              <p className="mt-0.5 flex items-baseline gap-1.5 flex-wrap">
+                <span style={{ fontSize: 22, fontWeight: 700, color: "var(--fg-1)" }}>
+                  {priceDisplay}
                 </span>
-              )}
-              {" "}
-              <span style={{ fontSize: 14, fontWeight: 500, marginLeft: 4, color: changeColor }}>
-                {a.changePercent >= 0 ? "+" : ""}
-                {fmt(a.changePercent)}%
-              </span>
-            </p>
-          )}
+                {priceUSDNote && (
+                  <span style={{ fontSize: 12, color: "var(--fg-5)" }}>
+                    {priceUSDNote}
+                  </span>
+                )}
+                <span style={{ fontSize: 14, fontWeight: 500, color: changeColor }}>
+                  {a.changePercent >= 0 ? "+" : ""}{fmt(a.changePercent)}%
+                </span>
+              </p>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {riskLevel && <RiskBadge level={riskLevel} />}
