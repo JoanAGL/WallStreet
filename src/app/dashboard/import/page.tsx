@@ -38,8 +38,17 @@ export default function ImportPage() {
     startTransition(async () => {
       const fd = new FormData();
       fd.append("file", file);
-      const res  = await fetch("/api/portfolio/import/degiro", { method: "POST", body: fd });
-      const data = await res.json() as ImportResult & { error?: string };
+      const res = await fetch("/api/portfolio/import/degiro", { method: "POST", body: fd });
+
+      let data: ImportResult & { error?: string };
+      try {
+        data = await res.json() as ImportResult & { error?: string };
+      } catch {
+        // Server returned non-JSON (e.g. 504 Gateway Timeout on Vercel Hobby)
+        setError("La importación tardó demasiado (límite de 10s en el plan actual). Inténtalo de nuevo o usa un CSV con menos ISINs.");
+        return;
+      }
+
       if (!res.ok) { setError(data.error ?? "Error desconocido."); return; }
       setResult(data);
       setFile(null);

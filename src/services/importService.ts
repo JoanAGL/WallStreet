@@ -19,38 +19,47 @@ async function resolveTickerFromIsin(
   isin: string
 ): Promise<{ ticker: string; name: string } | null> {
   try {
-    const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(isin)}&quotesCount=3&newsCount=0&listsCount=0`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": YAHOO_UA, Accept: "application/json" },
-      signal: AbortSignal.timeout(6_000),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as YFSearchResponse;
-    const quote =
-      data.quotes?.find((q) => q.quoteType === "EQUITY" || q.quoteType === "ETF") ??
-      data.quotes?.[0];
-    if (!quote?.symbol) return null;
-    return {
-      ticker: quote.symbol.toUpperCase(),
-      name:   quote.longname ?? quote.shortname ?? quote.symbol,
-    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4_000); // 4s per ISIN
+    try {
+      const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(isin)}&quotesCount=3&newsCount=0&listsCount=0`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": YAHOO_UA, Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as YFSearchResponse;
+      const quote =
+        data.quotes?.find((q) => q.quoteType === "EQUITY" || q.quoteType === "ETF") ??
+        data.quotes?.[0];
+      if (!quote?.symbol) return null;
+      return {
+        ticker: quote.symbol.toUpperCase(),
+        name:   quote.longname ?? quote.shortname ?? quote.symbol,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
-    return null;
+    return null; // timeout or network error → ISIN added to isinsFailed
   }
 }
 
 async function resolveIsinBatch(
   isins: string[]
 ): Promise<Map<string, { ticker: string; name: string }>> {
-  const result = new Map<string, { ticker: string; name: string }>();
-  const unique  = Array.from(new Set(isins.filter(Boolean)));
-  for (let i = 0; i < unique.length; i += 3) {
-    const batch   = unique.slice(i, i + 3);
+  const result     = new Map<string, { ticker: string; name: string }>();
+  const unique     = Array.from(new Set(isins.filter(Boolean)));
+  const BATCH_SIZE = 8;   // increased from 3 — Yahoo Finance handles 8 in parallel fine
+  const PAUSE_MS   = 100; // reduced from 250ms
+
+  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
+    const batch   = unique.slice(i, i + BATCH_SIZE);
     const results = await Promise.all(batch.map((isin) => resolveTickerFromIsin(isin)));
     batch.forEach((isin, idx) => {
       if (results[idx]) result.set(isin, results[idx]!);
     });
-    if (i + 3 < unique.length) await new Promise((r) => setTimeout(r, 250));
+    if (i + BATCH_SIZE < unique.length) await new Promise((r) => setTimeout(r, PAUSE_MS));
   }
   return result;
 }

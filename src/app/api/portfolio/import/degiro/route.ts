@@ -4,8 +4,9 @@ import { authOptions }      from "@/lib/auth";
 import { importDegiroCSV }  from "@/services/importService";
 
 export const runtime = "nodejs";
-// Large files + Yahoo Finance calls can take a while
-export const maxDuration = 60;
+// Vercel Pro supports up to 300s; Hobby hard-caps at 10s regardless of this value.
+// The client handles the Hobby timeout gracefully with a catch around .json().
+export const maxDuration = 300;
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
