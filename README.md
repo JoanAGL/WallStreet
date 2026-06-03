@@ -71,61 +71,6 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 - **Ventas históricas manuales** — Formulario en `/dashboard/history` para registrar posiciones compradas y vendidas antes de usar el sistema: ticker libre (no necesita estar en el dashboard), número de acciones, precio medio de compra, precio de venta, fecha y notas opcionales. Preview en tiempo real de invertido / recaudado / profit / ROI antes de guardar. Almacenadas en `ManualSellEntry` con relación directa a `User` (sin Stock). API: `POST /api/portfolio/history/manual` y `DELETE /api/portfolio/history/manual/[id]`. Aparecen en el historial con badge «manual» para distinguirlas de las que vienen del TransactionPanel
 - **Vista global de rendimiento** — `/dashboard/portfolio` muestra todas las posiciones con transacciones, agregados globales (valor actual total, coste base total, PnL no realizado + %, PnL realizado, PnL total) y detalle por posición con todas las métricas; accesible desde «Rendimiento →» en el resumen de cartera
 
-### Módulo de Importación Masiva (DEGIRO)
-
-Importa automáticamente tu historial completo de transacciones desde el broker DEGIRO sin introducción manual de datos.
-
-**Cómo funciona:**
-1. Exporta el CSV desde DEGIRO → Actividad → Transacciones (rango de fechas libre)
-2. Accede a `/dashboard/import` y arrastra el archivo o selecciónalo
-3. El sistema procesa el CSV, crea las posiciones en el dashboard y recalcula el WAC
-
-**Parser ultra-defensivo para el formato DEGIRO (`Transactions.csv`):**
-- **Cabeceras vacías** — el patrón `Precio,,Valor local,,Valor EUR` (columnas de divisa sin nombre) se limpia automáticamente al mapear el CSV
-- **Decimales europeos** — valores entre comillas con coma decimal (`"209,5000"`, `"-3602,75"`) se convierten mediante `.replace(',', '.')` antes de `parseFloat`
-- **Lógica de signos** — `Número > 0` → `BUY` (el `Total EUR` vendrá negativo por salida de caja); `Número < 0` → `SELL` con `Math.abs(Número)` acciones
-- **Orden inverso** — el CSV viene del movimiento más nuevo al más antiguo; el importer lo invierte antes de procesar para que el WAC se calcule en orden cronológico real
-- **BOM** — elimina el byte order mark UTF-8 que algunos exports incluyen al inicio
-- **Filas no operativas** — dividendos, depósitos y operaciones de divisa (con `Número = 0`) se descartan automáticamente
-
-**Deduplicación y atomicidad:**
-- Usa `prisma.$transaction` con timeout de 30 segundos; si cualquier paso falla, no se inserta nada
-- Antes de insertar cada transacción comprueba si ya existe (mismo stock, tipo, acciones, precio y fecha) → seguro reimportar el mismo archivo varias veces
-- Busca el `Stock` por ISIN primero, luego por ticker; si no existe, lo crea con el nombre del producto y el ISIN
-
-**Nuevos campos en el modelo `Stock`:**
-- `isin String?` — código ISIN para deduplicación robusta entre mercados/brokers
-- `name String?` — nombre completo del producto (ej. `"Apple Inc"`, `"iShares Core MSCI World..."`)
-
-**API:** `POST /api/portfolio/import/degiro` — recibe `FormData` con campo `file` (CSV ≤ 10 MB). Devuelve `{ imported, skipped, stocksCreated }`.
-
-### Motor de Psicología Financiera e Insights de Inversión
-
-Dashboard analítico en `/dashboard/insights` que evalúa la calidad de tus decisiones de inversión mediante métricas de comportamiento financiero basadas en el historial de transacciones.
-
-**Métricas calculadas (`src/services/decisionAnalysisService.ts`):**
-
-| Métrica | Descripción | Detección |
-|---------|-------------|-----------|
-| **Efecto Disposición** | Días medios de retención en posiciones ganadoras vs perdedoras | Sesgo si las perdedoras se retienen >30% más tiempo que las ganadoras |
-| **Profit Factor Global** | Σganancias cerradas / Σpérdidas cerradas | ≥2 = excelente; 1–2 = positivo; <1 = las pérdidas superan las ganancias |
-| **Ventas Prematuras** | Precio de venta histórico vs precio actual de mercado | Alerta si el activo ha subido >10% desde que lo vendiste |
-| **Benchmark S&P 500** | Simula qué habría rendido el mismo capital invertido en SPY en cada fecha de compra | Calcula alpha = retorno cartera − retorno simulado SPY |
-
-**Cómo se calcula el Efecto Disposición:**
-- Para cada SELL, se obtiene la fecha del primer BUY del mismo stock → `holdingDays = sellDate - firstBuyDate`
-- Se clasifica como `winner` (profit > 0) o `loser` (profit < 0)
-- Se comparan los promedios: `avgDaysWinners` vs `avgDaysLosers`
-- El sesgo se detecta cuando `avgDaysLosers > avgDaysWinners × 1.3` con ≥ 2 operaciones de cada tipo
-
-**Cómo se calcula el Benchmark S&P 500:**
-- Para cada transacción BUY (fecha D, importe A en USD), simula: `spyShares = A / SPY_price(D)`
-- Precio actual SPY interpolado de una tabla con precios reales anuales 2014–2026
-- `SPY return (%) = (Σ spyShares × SPY_now − Σ A) / Σ A × 100`
-- Compara con el retorno realizado real de la cartera (operaciones cerradas)
-
-**API:** `GET /api/portfolio/insights/decisions` — devuelve JSON con todas las métricas, top 3 mejores decisiones y top 3 mayores errores.
-
 ### Diseño visual
 
 Tema oscuro fintech inspirado en MyInvestor / DeGiro, implementado mediante un design system con tokens CSS y estilos inline semánticos.
@@ -221,10 +166,6 @@ src/
 │   │   │   ├── history/
 │   │   │   │   └── manual/       # POST: nueva venta histórica manual
 │   │   │   │       └── [id]/     # DELETE: eliminar venta histórica manual
-│   │   │   ├── import/
-│   │   │   │   └── degiro/       # POST: importar CSV de DEGIRO (FormData)
-│   │   │   ├── insights/
-│   │   │   │   └── decisions/    # GET: análisis de sesgos y decisiones
 │   │   │   ├── transactions/     # GET+POST: métricas WAC + registrar BUY/SELL
 │   │   │   └── transactions/[id] # PATCH+DELETE: editar/eliminar transacción
 │   │   ├── market/top-gainers/   # GET: top movers Finnhub
@@ -237,13 +178,9 @@ src/
 │   │   ├── simulation/page.tsx   # Monte Carlo + stress tests
 │   │   ├── risk-profile/page.tsx # Cuestionario + resultado de perfil
 │   │   ├── settings/page.tsx     # Ajustes de cuenta
-│   │   ├── help/page.tsx         # Documentación de uso
-│   │   ├── import/page.tsx       # Drag & drop importación CSV DEGIRO
-│   │   └── insights/page.tsx     # Dashboard de sesgos y análisis de decisiones
+│   │   └── help/page.tsx         # Documentación de uso
 │   └── (auth)/                   # Login + registro
 ├── services/                     # Lógica de negocio
-│   ├── importService.ts          # Parser CSV DEGIRO + importación atómica con WAC
-│   ├── decisionAnalysisService.ts# Sesgos: efecto disposición, profit factor, ventas prematuras, alpha vs SPY
 │   ├── analysisOrchestrator.ts   # Pipeline principal multi-fase
 │   ├── aiAnalysisService.ts      # Análisis multi-horizonte + batch Gemini
 │   ├── technicalAnalysisService.ts # SMA, RSI, RSISeries, ATR, RelVol, Hurst, divergencia precio/RSI

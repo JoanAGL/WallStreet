@@ -13,7 +13,6 @@ import PortfolioBenchmark from "@/components/dashboard/PortfolioBenchmark";
 import TopMovers from "@/components/dashboard/TopMovers";
 import CorrelationMatrix from "@/components/dashboard/CorrelationMatrix";
 import TaxHarvestingPanel from "@/components/dashboard/TaxHarvestingPanel";
-import ClosedStocksSection from "@/components/dashboard/ClosedStocksSection";
 
 export const dynamic = "force-dynamic";
 
@@ -26,18 +25,13 @@ export default async function DashboardPage() {
     getPortfolioAnalysis(session.user.id),
   ]);
 
-  // Active = quantity IS NULL (manually added) OR quantity > 0 (open position).
-  // Closed = quantity === 0 (fully sold, set by importer) — shown in a collapsible section.
-  const activeStocks = stocks.filter((s) => s.quantity !== 0);
-  const closedStocks = stocks.filter((s) => s.quantity === 0);
-
-  const lastUpdatedAt = activeStocks
+  const lastUpdatedAt = stocks
     .map((s) => s.analysis?.updatedAt)
     .filter(Boolean)
     .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())[0]
     ?.toISOString() ?? null;
 
-  const stocksWithAnalysis = activeStocks.filter((s) => s.analysis).length;
+  const stocksWithAnalysis = stocks.filter((s) => s.analysis).length;
 
   return (
     <div className="space-y-6">
@@ -47,22 +41,17 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Mis acciones</h1>
           <p className="text-sm text-gray-500">
-            {activeStocks.length} / 20 posiciones activas
-            {stocks.length > activeStocks.length && (
-              <span style={{ color: "var(--fg-5)" }}>
-                {" "}· {stocks.length - activeStocks.length} cerradas (ocultas)
-              </span>
-            )}
+            {stocks.length} / 20 acciones añadidas
           </p>
         </div>
         <UpdateButton lastUpdatedAt={lastUpdatedAt} />
       </div>
 
-      <PortfolioSummary stocks={activeStocks} />
+      <PortfolioSummary stocks={stocks} />
 
-      <PortfolioBenchmark stocks={activeStocks} />
+      <PortfolioBenchmark stocks={stocks} />
 
-      <TaxHarvestingPanel stocks={activeStocks} />
+      <TaxHarvestingPanel stocks={stocks} />
 
       {stocksWithAnalysis >= 2 && <CorrelationMatrix />}
 
@@ -78,27 +67,25 @@ export default async function DashboardPage() {
         <p className="text-sm font-medium text-gray-700 mb-3">
           Añadir acción (NYSE / NASDAQ)
         </p>
-        <AddStockForm currentCount={activeStocks.length} />
+        <AddStockForm currentCount={stocks.length} />
       </div>
 
       <TopMovers />
 
-      {activeStocks.length === 0 ? (
+      {stocks.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-4xl mb-3">📈</p>
           <p className="text-sm">
-            No tienes posiciones activas. Añade acciones o importa tu cartera desde DEGIRO.
+            No tienes acciones añadidas. Añade hasta 20 para ver el análisis.
           </p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
-          {activeStocks.map((stock) => (
+          {stocks.map((stock) => (
             <StockCard key={stock.id} stock={stock} />
           ))}
         </div>
       )}
-
-      <ClosedStocksSection stocks={closedStocks} />
     </div>
   );
 }

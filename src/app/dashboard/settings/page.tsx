@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { signOut, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 import Link from "next/link";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -24,9 +23,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 export default function SettingsPage() {
-  const router = useRouter();
-  useSession(); // keep session context
-
   // Profile
   const [name, setName]               = useState("");
   const [profileMsg, setProfileMsg]   = useState<{ ok: boolean; text: string } | null>(null);
@@ -39,12 +35,7 @@ export default function SettingsPage() {
   const [pwdMsg, setPwdMsg]           = useState<{ ok: boolean; text: string } | null>(null);
   const [pwdLoading, setPwdLoading]   = useState(false);
 
-  // Reset portfolio
-  const [resetConfirm, setResetConfirm] = useState("");
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetMsg, setResetMsg]         = useState<{ ok: boolean; text: string } | null>(null);
-
-  // Delete account
+  // Delete
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteMsg, setDeleteMsg]         = useState<string | null>(null);
@@ -79,20 +70,6 @@ export default function SettingsPage() {
       setCurrentPwd(""); setNewPwd(""); setConfirmPwd("");
     } else {
       setPwdMsg({ ok: false, text: data.error ?? "Error al cambiar la contraseña." });
-    }
-  }
-
-  async function resetPortfolio() {
-    if (resetConfirm !== "LIMPIAR") { setResetMsg({ ok: false, text: 'Escribe "LIMPIAR" para confirmar.' }); return; }
-    setResetLoading(true); setResetMsg(null);
-    const res = await fetch("/api/portfolio/reset", { method: "DELETE" });
-    setResetLoading(false);
-    if (res.ok) {
-      setResetMsg({ ok: true, text: "Cartera eliminada. Redirigiendo al dashboard…" });
-      setResetConfirm("");
-      setTimeout(() => router.push("/dashboard"), 1500);
-    } else {
-      setResetMsg({ ok: false, text: "Error al limpiar la cartera. Inténtalo de nuevo." });
     }
   }
 
@@ -169,34 +146,6 @@ export default function SettingsPage() {
         >
           Actualizar perfil de riesgo
         </Link>
-      </Section>
-
-      <Section title="Limpiar cartera">
-        <p className="text-sm text-gray-600">
-          Elimina <strong>todas tus acciones, transacciones, historial de ventas y análisis</strong> sin borrar tu cuenta. Útil para empezar desde cero o reimportar un CSV corregido.
-        </p>
-        <div className="space-y-3">
-          <Field label='Escribe "LIMPIAR" para confirmar'>
-            <input
-              value={resetConfirm}
-              onChange={(e) => setResetConfirm(e.target.value)}
-              placeholder="LIMPIAR"
-              className={`${inputClass} border-orange-200 focus:ring-orange-400`}
-            />
-          </Field>
-          {resetMsg && (
-            <p className={`text-sm ${resetMsg.ok ? "text-green-600" : "text-red-600"}`}>{resetMsg.text}</p>
-          )}
-          <button
-            type="button"
-            onClick={resetPortfolio}
-            disabled={resetLoading || resetConfirm !== "LIMPIAR"}
-            style={{ background: resetLoading || resetConfirm !== "LIMPIAR" ? undefined : "#EA580C" }}
-            className="px-4 py-2 text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
-          >
-            {resetLoading ? "Limpiando…" : "Limpiar toda la cartera"}
-          </button>
-        </div>
       </Section>
 
       <Section title="Eliminar cuenta">

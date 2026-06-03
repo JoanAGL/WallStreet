@@ -50,8 +50,6 @@ export default async function DashboardLayout({
 
             <NavLink href="/dashboard/simulation">Simulación</NavLink>
             <NavLink href="/dashboard/portfolio">Rendimiento</NavLink>
-            <NavLink href="/dashboard/insights" className="hidden sm:inline">Insights</NavLink>
-            <NavLink href="/dashboard/import" className="hidden sm:inline">Importar</NavLink>
             <NavLink href="/dashboard/help" className="hidden sm:inline">Ayuda</NavLink>
             <NavLink href="/dashboard/settings">Ajustes</NavLink>
 
