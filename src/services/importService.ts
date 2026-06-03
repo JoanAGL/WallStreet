@@ -15,11 +15,6 @@ interface YFSearchResponse {
   quotes?: YFSearchQuote[];
 }
 
-/**
- * Resolves a real market ticker and company name from an ISIN via Yahoo Finance
- * search. Returns null on any network error or when no result is found.
- * Times out after 6 seconds.
- */
 async function resolveTickerFromIsin(
   isin: string
 ): Promise<{ ticker: string; name: string } | null> {
@@ -31,12 +26,9 @@ async function resolveTickerFromIsin(
     });
     if (!res.ok) return null;
     const data = (await res.json()) as YFSearchResponse;
-
-    // Prefer EQUITY/ETF results; fallback to first quote
     const quote =
       data.quotes?.find((q) => q.quoteType === "EQUITY" || q.quoteType === "ETF") ??
       data.quotes?.[0];
-
     if (!quote?.symbol) return null;
     return {
       ticker: quote.symbol.toUpperCase(),
@@ -47,16 +39,11 @@ async function resolveTickerFromIsin(
   }
 }
 
-/**
- * Resolves a batch of ISINs with rate-limiting (3 parallel, 250 ms between
- * batches). Returns a Map<isin, {ticker, name}> for all successfully resolved ones.
- */
 async function resolveIsinBatch(
   isins: string[]
 ): Promise<Map<string, { ticker: string; name: string }>> {
   const result = new Map<string, { ticker: string; name: string }>();
   const unique  = Array.from(new Set(isins.filter(Boolean)));
-
   for (let i = 0; i < unique.length; i += 3) {
     const batch   = unique.slice(i, i + 3);
     const results = await Promise.all(batch.map((isin) => resolveTickerFromIsin(isin)));
@@ -96,12 +83,10 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
-/** Converts DEGIRO numeric strings ("209,5000", "-3602,75") to float. */
 function parseDegNum(s: string): number {
   return parseFloat((s ?? "").trim().replace(/"/g, "").replace(",", "."));
 }
 
-/** Parses DEGIRO date (DD-MM-YYYY) + time (HH:MM) into a JS Date. */
 function parseDegDate(fecha: string, hora: string): Date {
   const [d, mo, y] = fecha.split(/[-/]/).map(Number);
   const [h = 0, m = 0] = (hora || "00:00").split(":").map(Number);
@@ -118,13 +103,62 @@ interface DegiroRow {
   isin:     string;
   numero:   number;
   precio:   number;
+  currency: string;   // FIX-2: price currency ("USD", "EUR", ...)
+  fxRate:   number;   // FIX-2: EUR→USD exchange rate from the row
+  orderId:  string;   // FIX-1: DEGIRO order ID for partial-fill grouping
 }
 
 export interface ImportResult {
   imported:      number;
   skipped:       number;
   stocksCreated: number;
-  isinsFailed:   string[];   // ISINs Yahoo Finance couldn't resolve
+  isinsFailed:   string[];
+}
+
+// ── FIX-1: merge partial fills that share the same order ID ──────────────────
+
+/**
+ * DEGIRO splits large orders into multiple rows with the same Order ID but
+ * different execution venues. This function collapses those into a single row:
+ * total shares = sum of partials, price = WAC of partials.
+ * Rows without an Order ID are passed through untouched.
+ */
+function mergePartialFills(rows: DegiroRow[]): DegiroRow[] {
+  const individual: DegiroRow[] = [];
+  const groups     = new Map<string, DegiroRow[]>();
+
+  for (const row of rows) {
+    const tipo = row.numero > 0 ? "BUY" : "SELL";
+    if (!row.orderId) {
+      individual.push(row);
+      continue;
+    }
+    const key = `${row.orderId}|${row.isin}|${tipo}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+
+  const merged: DegiroRow[] = individual.slice();
+
+  for (const group of Array.from(groups.values())) {
+    if (group.length === 1) {
+      merged.push(group[0]);
+      continue;
+    }
+    const first    = group[0];
+    const tipo     = first.numero > 0 ? "BUY" : "SELL";
+    const totalAbs = group.reduce((s, r) => s + Math.abs(r.numero), 0);
+    const wacPrice = group.reduce((s, r) => s + Math.abs(r.numero) * r.precio, 0) / totalAbs;
+    merged.push({
+      ...first,
+      numero: tipo === "BUY" ? totalAbs : -totalAbs,
+      precio: Math.round(wacPrice * 10000) / 10000,
+    });
+  }
+
+  // Re-sort chronologically after merging
+  merged.sort((a, b) => parseDegDate(a.fecha, a.hora).getTime() - parseDegDate(b.fecha, b.hora).getTime());
+  return merged;
 }
 
 // ── Main import function ──────────────────────────────────────────────────────
@@ -133,12 +167,10 @@ export async function importDegiroCSV(
   buffer: Buffer,
   userId: string
 ): Promise<ImportResult> {
-  // Strip BOM, split into lines
   const text     = buffer.toString("utf-8").replace(/^﻿/, "");
   const allLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (allLines.length < 2) throw new Error("El archivo CSV está vacío.");
 
-  // Locate header row (first column normalises to "fecha" or "date")
   const headerIdx = allLines.findIndex((l) => {
     const first = normHeader(parseCSVLine(l)[0] ?? "");
     return first === "fecha" || first === "date";
@@ -149,7 +181,6 @@ export async function importDegiroCSV(
     );
   }
 
-  // Build column-name → index map (skip empty headers = currency columns)
   const rawHeaders = parseCSVLine(allLines[headerIdx]);
   const col: Record<string, number> = {};
   rawHeaders.forEach((h, i) => {
@@ -160,9 +191,18 @@ export async function importDegiroCSV(
   for (const req of ["fecha", "producto", "isin", "numero", "precio"]) {
     if (!(req in col)) throw new Error(`Columna requerida "${req}" no encontrada.`);
   }
+
   const horaKey = "hora" in col ? "hora" : null;
 
-  // Parse data rows
+  // FIX-3: resolve order-ID column with multiple name variants
+  const orderIdKey = ["id orden", "idorden", "id_orden", "order id", "orderid"]
+    .find((k) => k in col) ?? null;
+
+  // FIX-2: resolve exchange-rate column
+  const fxKey = ["tipo de cambio", "tipo cambio", "exchange rate"]
+    .find((k) => k in col) ?? null;
+
+  // ── Parse data rows ──────────────────────────────────────────────────────
   const rows: DegiroRow[] = [];
   for (const line of allLines.slice(headerIdx + 1)) {
     const cells   = parseCSVLine(line);
@@ -175,19 +215,30 @@ export async function importDegiroCSV(
     const numero   = parseDegNum(cells[col["numero"]] ?? "");
     const precio   = parseDegNum(cells[col["precio"]] ?? "");
 
-    // Skip non-trading rows (dividends, deposits — numero === 0)
     if (!isin || !isFinite(numero) || numero === 0) continue;
     if (!isFinite(precio) || precio <= 0) continue;
 
-    rows.push({ fecha, hora, producto, isin, numero, precio });
+    // FIX-2: currency is the unnamed column immediately after "precio"
+    const currency = (cells[col["precio"] + 1] ?? "").trim().toUpperCase() || "USD";
+
+    // FIX-2: exchange rate (e.g. 1.1630 means 1 EUR = 1.1630 USD)
+    const fxRate = fxKey ? parseDegNum(cells[col[fxKey]] ?? "") : NaN;
+
+    // FIX-3: order ID
+    const orderId = orderIdKey ? (cells[col[orderIdKey]] ?? "").trim() : "";
+
+    rows.push({ fecha, hora, producto, isin, numero, precio, currency, fxRate, orderId });
   }
   if (rows.length === 0) throw new Error("No se encontraron transacciones válidas en el archivo.");
 
   // CRITICAL: DEGIRO exports newest-first → reverse for chronological WAC
   rows.reverse();
 
+  // FIX-1: collapse partial fills of the same order into a single row
+  const mergedRows = mergePartialFills(rows);
+
   // ── Phase 1: resolve ISINs via Yahoo Finance ──────────────────────────────
-  const uniqueIsins = Array.from(new Set(rows.map((r) => r.isin).filter(Boolean)));
+  const uniqueIsins = Array.from(new Set(mergedRows.map((r) => r.isin).filter(Boolean)));
   const resolved    = await resolveIsinBatch(uniqueIsins);
   const isinsFailed = uniqueIsins.filter((i) => !resolved.has(i));
 
@@ -196,34 +247,27 @@ export async function importDegiroCSV(
   let stocksCreated = 0;
 
   for (const isin of uniqueIsins) {
-    const info = resolved.get(isin);
-    // Use Yahoo-resolved ticker; fall back to cleaned Producto of first row with this ISIN
+    const info   = resolved.get(isin);
     const ticker =
       info?.ticker ??
       (() => {
-        const row = rows.find((r) => r.isin === isin);
+        const row = mergedRows.find((r) => r.isin === isin);
         return row?.producto.replace(/[^A-Z0-9]/gi, "").toUpperCase().substring(0, 8) ?? isin.substring(0, 8);
       })();
-    const name = info?.name ?? rows.find((r) => r.isin === isin)?.producto ?? isin;
+    const name = info?.name ?? mergedRows.find((r) => r.isin === isin)?.producto ?? isin;
 
-    // Lookup: by ISIN first, then by ticker
     let stock =
       await prisma.stock.findFirst({ where: { isin, userId } }) ??
       await prisma.stock.findUnique({ where: { ticker_userId: { ticker, userId } } });
 
     if (!stock) {
-      stock = await prisma.stock.create({
-        data: { userId, ticker, isin, name },
-      });
+      stock = await prisma.stock.create({ data: { userId, ticker, isin, name } });
       stocksCreated++;
-    } else {
-      // Backfill ISIN/name if missing on existing stock
-      if (!stock.isin || !stock.name) {
-        stock = await prisma.stock.update({
-          where: { id: stock.id },
-          data: { isin: stock.isin ?? isin, name: stock.name ?? name },
-        });
-      }
+    } else if (!stock.isin || !stock.name) {
+      stock = await prisma.stock.update({
+        where: { id: stock.id },
+        data:  { isin: stock.isin ?? isin, name: stock.name ?? name },
+      });
     }
     stockCache.set(isin, stock.id);
   }
@@ -240,29 +284,34 @@ export async function importDegiroCSV(
     )
   );
 
-  // ── Phase 4: build insert list (in-memory dedup) ──────────────────────────
+  // ── Phase 4: build insert list ────────────────────────────────────────────
   type TxInsert = {
     stockId: string; type: "BUY" | "SELL"; shares: number; price: number; date: Date;
   };
   const toInsert: TxInsert[] = [];
 
-  for (const row of rows) {
+  for (const row of mergedRows) {
     const stockId = stockCache.get(row.isin);
     if (!stockId) continue;
 
     const type   = row.numero > 0 ? "BUY" : "SELL";
     const shares = Math.abs(row.numero);
     const date   = parseDegDate(row.fecha, row.hora);
-    const key    = `${stockId}|${type}|${shares}|${row.precio}|${date.getTime()}`;
 
+    // FIX-2: convert EUR (or other) price to USD using the row's exchange rate
+    const precioUSD = (row.currency !== "USD" && isFinite(row.fxRate) && row.fxRate > 0)
+      ? Math.round(row.precio * row.fxRate * 10000) / 10000
+      : row.precio;
+
+    const key = `${stockId}|${type}|${shares}|${precioUSD}|${date.getTime()}`;
     if (!dedupSet.has(key)) {
-      toInsert.push({ stockId, type, shares, price: row.precio, date });
+      toInsert.push({ stockId, type, shares, price: precioUSD, date });
       dedupSet.add(key);
     }
   }
-  const skipped = rows.length - toInsert.length;
+  const skipped = mergedRows.length - toInsert.length;
 
-  // ── Phase 5: bulk insert with createMany (no interactive transaction) ─────
+  // ── Phase 5: bulk insert ──────────────────────────────────────────────────
   if (toInsert.length > 0) {
     await prisma.transaction.createMany({ data: toInsert });
   }
