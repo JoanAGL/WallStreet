@@ -13,6 +13,7 @@ export type PrismaStock = {
   purchasePrice: number | null;
   purchaseDate: Date | null;
   quantity: number | null;
+  currency: string;
   createdAt: Date;
 };
 
