@@ -13,6 +13,7 @@ import PortfolioBenchmark from "@/components/dashboard/PortfolioBenchmark";
 import TopMovers from "@/components/dashboard/TopMovers";
 import CorrelationMatrix from "@/components/dashboard/CorrelationMatrix";
 import TaxHarvestingPanel from "@/components/dashboard/TaxHarvestingPanel";
+import ClosedStocksSection from "@/components/dashboard/ClosedStocksSection";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,10 @@ export default async function DashboardPage() {
     getPortfolioAnalysis(session.user.id),
   ]);
 
-  // Active = quantity IS NULL (manually added, no WAC data yet) OR quantity > 0 (open position).
-  // Stocks with quantity = 0 are fully sold (set by the importer) — hide from dashboard.
+  // Active = quantity IS NULL (manually added) OR quantity > 0 (open position).
+  // Closed = quantity === 0 (fully sold, set by importer) — shown in a collapsible section.
   const activeStocks = stocks.filter((s) => s.quantity !== 0);
+  const closedStocks = stocks.filter((s) => s.quantity === 0);
 
   const lastUpdatedAt = activeStocks
     .map((s) => s.analysis?.updatedAt)
@@ -95,6 +97,8 @@ export default async function DashboardPage() {
           ))}
         </div>
       )}
+
+      <ClosedStocksSection stocks={closedStocks} />
     </div>
   );
 }
