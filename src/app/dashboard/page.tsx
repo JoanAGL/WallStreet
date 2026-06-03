@@ -25,13 +25,17 @@ export default async function DashboardPage() {
     getPortfolioAnalysis(session.user.id),
   ]);
 
-  const lastUpdatedAt = stocks
+  // Active = quantity IS NULL (manually added, no WAC data yet) OR quantity > 0 (open position).
+  // Stocks with quantity = 0 are fully sold (set by the importer) — hide from dashboard.
+  const activeStocks = stocks.filter((s) => s.quantity !== 0);
+
+  const lastUpdatedAt = activeStocks
     .map((s) => s.analysis?.updatedAt)
     .filter(Boolean)
     .sort((a, b) => new Date(b!).getTime() - new Date(a!).getTime())[0]
     ?.toISOString() ?? null;
 
-  const stocksWithAnalysis = stocks.filter((s) => s.analysis).length;
+  const stocksWithAnalysis = activeStocks.filter((s) => s.analysis).length;
 
   return (
     <div className="space-y-6">
@@ -41,17 +45,22 @@ export default async function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold text-gray-900">Mis acciones</h1>
           <p className="text-sm text-gray-500">
-            {stocks.length} / 20 acciones añadidas
+            {activeStocks.length} / 20 posiciones activas
+            {stocks.length > activeStocks.length && (
+              <span style={{ color: "var(--fg-5)" }}>
+                {" "}· {stocks.length - activeStocks.length} cerradas (ocultas)
+              </span>
+            )}
           </p>
         </div>
         <UpdateButton lastUpdatedAt={lastUpdatedAt} />
       </div>
 
-      <PortfolioSummary stocks={stocks} />
+      <PortfolioSummary stocks={activeStocks} />
 
-      <PortfolioBenchmark stocks={stocks} />
+      <PortfolioBenchmark stocks={activeStocks} />
 
-      <TaxHarvestingPanel stocks={stocks} />
+      <TaxHarvestingPanel stocks={activeStocks} />
 
       {stocksWithAnalysis >= 2 && <CorrelationMatrix />}
 
@@ -67,21 +76,21 @@ export default async function DashboardPage() {
         <p className="text-sm font-medium text-gray-700 mb-3">
           Añadir acción (NYSE / NASDAQ)
         </p>
-        <AddStockForm currentCount={stocks.length} />
+        <AddStockForm currentCount={activeStocks.length} />
       </div>
 
       <TopMovers />
 
-      {stocks.length === 0 ? (
+      {activeStocks.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-4xl mb-3">📈</p>
           <p className="text-sm">
-            No tienes acciones añadidas. Añade hasta 20 para ver el análisis.
+            No tienes posiciones activas. Añade acciones o importa tu cartera desde DEGIRO.
           </p>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
-          {stocks.map((stock) => (
+          {activeStocks.map((stock) => (
             <StockCard key={stock.id} stock={stock} />
           ))}
         </div>
