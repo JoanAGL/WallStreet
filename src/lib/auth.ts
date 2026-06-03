@@ -2,6 +2,7 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { findUserByEmail } from "@/repositories/userRepository";
+import { prisma } from "@/lib/prisma";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -19,6 +20,10 @@ export const authOptions: NextAuthOptions = {
 
         const isValid = await bcrypt.compare(credentials.password, user.password);
         if (!isValid) return null;
+
+        // Fire-and-forget: record login timestamp without blocking the auth response
+        prisma.user.update({ where: { id: user.id }, data: { lastLogin: new Date() } })
+          .catch((e) => console.error("[auth] lastLogin update failed:", e));
 
         return { id: user.id, email: user.email, name: user.name ?? undefined };
       },

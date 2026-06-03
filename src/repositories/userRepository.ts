@@ -16,6 +16,7 @@ export async function createUser(data: {
       id: true,
       email: true,
       name: true,
+      lastLogin: true,
       createdAt: true,
       updatedAt: true,
     },
