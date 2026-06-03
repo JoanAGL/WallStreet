@@ -21,14 +21,50 @@ export interface HistoricalData {
   dates:      string[];
 }
 
+async function getQuoteFromYahoo(ticker: string): Promise<CurrentQuote | null> {
+  try {
+    const [candles, currency] = await Promise.all([
+      fetchYahooCandles(ticker, 5),
+      fetchTickerCurrency(ticker),
+    ]);
+    if (!candles.closes.length) return null;
+
+    const price     = candles.closes[candles.closes.length - 1];
+    const prevClose = candles.closes.length > 1
+      ? candles.closes[candles.closes.length - 2]
+      : price;
+
+    if (!price || price <= 0) return null;
+
+    const change        = Math.round((price - prevClose) * 10000) / 10000;
+    const changePercent = prevClose > 0
+      ? Math.round(((price - prevClose) / prevClose) * 10000) / 100
+      : 0;
+
+    let priceUSD = price;
+    if (currency !== "USD") {
+      const fxRate = await fetchEURUSD();
+      priceUSD = Math.round(price * fxRate * 10000) / 10000;
+    }
+
+    return { ticker, price, priceUSD, currency, previousClose: prevClose, change, changePercent, fetchedAt: new Date().toISOString() };
+  } catch {
+    return null;
+  }
+}
+
 export async function getCurrentQuote(ticker: string): Promise<CurrentQuote> {
   const [quote, currency] = await Promise.all([
     fetchQuote(ticker),
     fetchTickerCurrency(ticker),
   ]);
 
-  if (!quote.c) {
-    throw new Error(`No se encontraron datos para el ticker: ${ticker}`);
+  // Finnhub cubre NYSE/NASDAQ. Para acciones europeas (SAB.MC, NOVO-B.CO, etc.)
+  // devuelve c:0 — en ese caso usar Yahoo Finance como fallback.
+  if (!quote.c || quote.c <= 0) {
+    const yahooQuote = await getQuoteFromYahoo(ticker);
+    if (yahooQuote) return yahooQuote;
+    throw new Error(`No se encontraron datos de precio para: ${ticker}`);
   }
 
   let priceUSD = quote.c;
