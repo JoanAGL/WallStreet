@@ -40,7 +40,7 @@ const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 //   portfolio AI:                                                         ≈ 30s
 //   Total worst-case estimate: ~185s — well within the 300s Pro limit.
 const TIMEOUTS = {
-  quote:            3_000,   // Finnhub real-time quote
+  quote:           10_000,   // aumentado de 3s → 10s (Finnhub + Yahoo fallback para acciones europeas)
   historical:       8_000,   // Yahoo Finance candlestick data
   fundamentals:     6_000,   // Yahoo Finance quoteSummary
   macro:           12_000,   // MacroService (NewsAPI + Gemini classify, 4h cache)
