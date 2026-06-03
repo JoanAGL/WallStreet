@@ -7,7 +7,7 @@ const SPY_HISTORY: [string, number][] = [
   ["2017-01-03", 225.24], ["2018-01-02", 267.56], ["2019-01-02", 249.92],
   ["2020-01-02", 324.87], ["2021-01-04", 374.43], ["2022-01-03", 479.58],
   ["2023-01-03", 380.82], ["2024-01-02", 476.46], ["2025-01-02", 589.33],
-  ["2026-01-02", 562.00], ["2026-06-15", 534.00],
+  ["2026-01-02", 586.00], ["2026-06-03", 591.00],
 ];
 
 function getSpyPrice(date: Date): number {
@@ -24,7 +24,7 @@ function getSpyPrice(date: Date): number {
   }
   return pts[pts.length - 1][1];
 }
-const SPY_NOW = getSpyPrice(new Date());
+// SPY_NOW is resolved at runtime inside getDecisionAnalysis (live fetch with fallback)
 
 // ── Live price fetch from Yahoo Finance ───────────────────────────────────────
 const YAHOO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
@@ -99,6 +99,10 @@ export interface DecisionAnalysis {
 // ── Main analysis ─────────────────────────────────────────────────────────────
 
 export async function getDecisionAnalysis(userId: string): Promise<DecisionAnalysis> {
+  // Fetch live SPY price for an accurate benchmark; fall back to interpolated history
+  const spyLive = await fetchCurrentPrice("SPY");
+  const SPY_NOW = spyLive ?? getSpyPrice(new Date());
+
   const allTxs = await getTransactionsByUser(userId);
 
   const stocks = await prisma.stock.findMany({

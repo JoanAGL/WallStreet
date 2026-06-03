@@ -111,10 +111,8 @@ interface DegiroRow {
   producto: string;
   isin:     string;
   numero:   number;
-  precio:   number;
-  currency: string;   // FIX-2: price currency ("USD", "EUR", ...)
-  fxRate:   number;   // FIX-2: EUR→USD exchange rate from the row
-  orderId:  string;   // FIX-1: DEGIRO order ID for partial-fill grouping
+  precio:   number;   // always in USD (converted at parse time)
+  orderId:  string;   // DEGIRO order ID for partial-fill grouping
 }
 
 export interface ImportResult {
@@ -227,16 +225,19 @@ export async function importDegiroCSV(
     if (!isin || !isFinite(numero) || numero === 0) continue;
     if (!isFinite(precio) || precio <= 0) continue;
 
-    // FIX-2: currency is the unnamed column immediately after "precio"
-    const currency = (cells[col["precio"] + 1] ?? "").trim().toUpperCase() || "USD";
+    // Currency is the unnamed column immediately after "precio" (e.g. "USD", "EUR")
+    const currency    = (cells[col["precio"] + 1] ?? "").trim().toUpperCase() || "USD";
+    // Exchange rate on this row (e.g. 1.1630 means 1 EUR = 1.1630 USD)
+    const fxRate      = fxKey ? parseDegNum(cells[col[fxKey]] ?? "") : NaN;
+    // Convert to USD at parse time so mergePartialFills WAC is always in USD
+    const precioFinal = (currency !== "USD" && isFinite(fxRate) && fxRate > 0)
+      ? Math.round(precio * fxRate * 10000) / 10000
+      : precio;
 
-    // FIX-2: exchange rate (e.g. 1.1630 means 1 EUR = 1.1630 USD)
-    const fxRate = fxKey ? parseDegNum(cells[col[fxKey]] ?? "") : NaN;
-
-    // FIX-3: order ID
+    // Order ID (Bug A: used to collapse partial fills of the same order)
     const orderId = orderIdKey ? (cells[col[orderIdKey]] ?? "").trim() : "";
 
-    rows.push({ fecha, hora, producto, isin, numero, precio, currency, fxRate, orderId });
+    rows.push({ fecha, hora, producto, isin, numero, precio: precioFinal, orderId });
   }
   if (rows.length === 0) throw new Error("No se encontraron transacciones válidas en el archivo.");
 
@@ -307,14 +308,10 @@ export async function importDegiroCSV(
     const shares = Math.abs(row.numero);
     const date   = parseDegDate(row.fecha, row.hora);
 
-    // FIX-2: convert EUR (or other) price to USD using the row's exchange rate
-    const precioUSD = (row.currency !== "USD" && isFinite(row.fxRate) && row.fxRate > 0)
-      ? Math.round(row.precio * row.fxRate * 10000) / 10000
-      : row.precio;
-
-    const key = `${stockId}|${type}|${shares}|${precioUSD}|${date.getTime()}`;
+    // row.precio is already in USD (converted at parse time, before mergePartialFills)
+    const key = `${stockId}|${type}|${shares}|${row.precio}|${date.getTime()}`;
     if (!dedupSet.has(key)) {
-      toInsert.push({ stockId, type, shares, price: precioUSD, date });
+      toInsert.push({ stockId, type, shares, price: row.precio, date });
       dedupSet.add(key);
     }
   }
