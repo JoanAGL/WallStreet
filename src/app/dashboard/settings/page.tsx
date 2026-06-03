@@ -201,6 +201,11 @@ export default function SettingsPage() {
           >
             {resetLoading ? "Limpiando…" : "Limpiar toda la cartera"}
           </button>
+          <p className="text-xs text-gray-500" style={{ marginTop: 8 }}>
+            💡 Si reimportaste un CSV y ves datos incorrectos (posiciones cerradas que siguen
+            apareciendo, precios $0.00, tax harvesting con acciones que ya no tienes), usa esta
+            opción para limpiar completamente y volver a importar desde cero.
+          </p>
         </div>
       </Section>
 

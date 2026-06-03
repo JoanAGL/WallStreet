@@ -25,6 +25,8 @@ export function detectHarvestOpportunities(
   const alerts: HarvestAlert[] = [];
   for (const s of stocks) {
     if (s.purchasePrice == null || s.quantity == null) continue;
+    if (s.currentPrice <= 0) continue;   // missing price — not a real loss
+    if (s.quantity <= 0) continue;       // closed position — nothing to harvest
     const latentLoss = (s.currentPrice - s.purchasePrice) * s.quantity;
     if (latentLoss < -HARVEST_THRESHOLD) {
       alerts.push({
