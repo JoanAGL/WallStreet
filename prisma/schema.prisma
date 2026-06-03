@@ -58,6 +58,7 @@ model Stock {
   purchasePrice     Float?
   purchaseDate      DateTime?
   quantity          Float?
+  currency          String            @default("USD")
   user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt         DateTime          @default(now())
 
@@ -92,6 +93,8 @@ model StockAnalysis {
   stock                 Stock    @relation(fields: [stockId], references: [id], onDelete: Cascade)
 
   price                 Float
+  priceUSD              Float?
+  currency              String   @default("USD")
   changePercent         Float
 
   sma20                 Float?

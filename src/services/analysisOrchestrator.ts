@@ -24,6 +24,7 @@ import {
   upsertPortfolioAnalysis,
 } from "@/repositories/portfolioAnalysisRepository";
 import { getStocksWithAnalysis } from "@/repositories/stockRepository";
+import { prisma } from "@/lib/prisma";
 import { generatePortfolioAnalysis } from "@/services/portfolioAIService";
 import type { StockAnalysisModel, InvestmentHorizon } from "@/types/models";
 import type { UpdateType } from "@/types/updateTypes";
@@ -60,6 +61,8 @@ const DEFAULT_FALLBACKS: DefaultFallbacks = {
   quote: (ticker) => ({
     ticker,
     price:         0,
+    priceUSD:      0,
+    currency:      "USD",
     previousClose: 0,
     change:        0,
     changePercent: 0,
@@ -460,20 +463,27 @@ async function runFullAnalysis(
       const active = horizonToAI(allAI, horizon);
       const metricsData = buildMetricsData(horizon, indicators, allFundamentals);
 
-      const analysis = await upsertAnalysis({
-        stockId: stock.id,
-        price: quote.price, changePercent: quote.changePercent,
-        sma20: indicators.sma20, sma50: indicators.sma50, rsi14: indicators.rsi14,
-        newsSummary: newsAnalysis.summary, newsSentiment: newsAnalysis.sentiment,
-        analysisText: active.analysisText,
-        scenarioLabel: active.scenarioLabel,
-        scenarioJustification: active.scenarioJustification,
-        divergenceAlert: indicators.priceRsiDivergence ?? null,
-        horizonMatch: active.horizonMatch,
-        keyMetrics: JSON.stringify(active.keyMetrics),
-        metricsData: JSON.stringify(metricsData),
-        allHorizons: JSON.stringify(allAI),
-      });
+      const [analysis] = await Promise.all([
+        upsertAnalysis({
+          stockId: stock.id,
+          price: quote.price, priceUSD: quote.priceUSD, currency: quote.currency,
+          changePercent: quote.changePercent,
+          sma20: indicators.sma20, sma50: indicators.sma50, rsi14: indicators.rsi14,
+          newsSummary: newsAnalysis.summary, newsSentiment: newsAnalysis.sentiment,
+          analysisText: active.analysisText,
+          scenarioLabel: active.scenarioLabel,
+          scenarioJustification: active.scenarioJustification,
+          divergenceAlert: indicators.priceRsiDivergence ?? null,
+          horizonMatch: active.horizonMatch,
+          keyMetrics: JSON.stringify(active.keyMetrics),
+          metricsData: JSON.stringify(metricsData),
+          allHorizons: JSON.stringify(allAI),
+        }),
+        prisma.stock.update({
+          where: { id: stock.id },
+          data:  { currency: quote.currency },
+        }),
+      ]);
 
       insertSnapshot({
         stockId: stock.id, price: quote.price, changePercent: quote.changePercent,
@@ -547,8 +557,12 @@ async function runPartialForStock(
   const patch: Record<string, unknown> = {};
 
   if (needsPrice && quoteResult.status === "fulfilled" && quoteResult.value) {
-    patch.price        = quoteResult.value.price;
-    patch.changePercent = quoteResult.value.changePercent;
+    const q = quoteResult.value;
+    patch.price         = q.price;
+    patch.priceUSD      = q.priceUSD;
+    patch.currency      = q.currency;
+    patch.changePercent = q.changePercent;
+    prisma.stock.update({ where: { id: stock.id }, data: { currency: q.currency } }).catch(() => {/* non-critical */});
   }
 
   if (needsTechnicals && historicalResult.status === "fulfilled" && historicalResult.value

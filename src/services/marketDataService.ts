@@ -1,13 +1,15 @@
 import { fetchQuote } from "@/lib/finnhubClient";
-import { fetchYahooCandles } from "@/lib/yahooFinanceClient";
+import { fetchYahooCandles, fetchTickerCurrency, fetchEURUSD } from "@/lib/yahooFinanceClient";
 
 export interface CurrentQuote {
-  ticker: string;
-  price: number;
+  ticker:        string;
+  price:         number;
+  priceUSD:      number;
+  currency:      string;
   previousClose: number;
-  change: number;
+  change:        number;
   changePercent: number;
-  fetchedAt: string;
+  fetchedAt:     string;
 }
 
 export interface HistoricalData {
@@ -20,19 +22,30 @@ export interface HistoricalData {
 }
 
 export async function getCurrentQuote(ticker: string): Promise<CurrentQuote> {
-  const quote = await fetchQuote(ticker);
+  const [quote, currency] = await Promise.all([
+    fetchQuote(ticker),
+    fetchTickerCurrency(ticker),
+  ]);
 
   if (!quote.c) {
     throw new Error(`No se encontraron datos para el ticker: ${ticker}`);
   }
 
+  let priceUSD = quote.c;
+  if (currency !== "USD") {
+    const fxRate = await fetchEURUSD();
+    priceUSD = Math.round(quote.c * fxRate * 10000) / 10000;
+  }
+
   return {
     ticker,
-    price: quote.c,
+    price:         quote.c,
+    priceUSD,
+    currency,
     previousClose: quote.pc,
-    change: quote.d,
+    change:        quote.d,
     changePercent: quote.dp,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt:     new Date().toISOString(),
   };
 }
 

@@ -6,6 +6,8 @@ import type { PriceRsiDivergence } from "@/services/technicalAnalysisService";
 export interface UpsertAnalysisData {
   stockId: string;
   price: number;
+  priceUSD: number | null;
+  currency: string;
   changePercent: number;
   sma20: number | null;
   sma50: number | null;

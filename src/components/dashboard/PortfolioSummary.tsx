@@ -58,7 +58,7 @@ export default function PortfolioSummary({ stocks, realizedPnL }: Props) {
            (s.purchasePrice == null || s.purchasePrice <= 0)
   );
   const totalCost    = withPosition.reduce((sum, s) => sum + s.purchasePrice! * s.quantity!, 0);
-  const totalValue   = withPosition.reduce((sum, s) => sum + (s.analysis?.price ?? 0) * s.quantity!, 0);
+  const totalValue   = withPosition.reduce((sum, s) => sum + (s.analysis?.priceUSD ?? s.analysis?.price ?? 0) * s.quantity!, 0);
   const totalPnl     = withPosition.length > 0 ? totalValue - totalCost : null;
   const totalPnlPct  = totalPnl != null && totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
 

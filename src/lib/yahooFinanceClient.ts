@@ -44,6 +44,44 @@ interface YahooChartResponse {
   };
 }
 
+// ── Currency helpers ─────────────────────────────────────────────────────────
+
+export async function fetchTickerCurrency(ticker: string): Promise<string> {
+  try {
+    const url = `${BASE_URL}/${encodeURIComponent(ticker)}?interval=1d&range=5d`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": YAHOO_UA },
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!res.ok) return "USD";
+    const data = await res.json() as {
+      chart: { result: [{ meta: { currency: string } }] | null };
+    };
+    return data.chart.result?.[0]?.meta?.currency ?? "USD";
+  } catch {
+    return "USD";
+  }
+}
+
+export async function fetchEURUSD(): Promise<number> {
+  try {
+    const url = `${BASE_URL}/EURUSD=X?interval=1d&range=5d`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": YAHOO_UA },
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!res.ok) return 1.10;
+    const data = await res.json() as {
+      chart: { result: [{ indicators: { quote: [{ close: (number | null)[] }] } }] | null };
+    };
+    const closes = data.chart.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    const last = [...closes].reverse().find((c) => c != null && c > 0);
+    return last ?? 1.10;
+  } catch {
+    return 1.10;
+  }
+}
+
 // ── Fundamentals (quoteSummary) ──────────────────────────────────────────────
 
 interface YahooRaw { raw: number }

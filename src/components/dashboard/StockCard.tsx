@@ -178,7 +178,13 @@ export default function StockCard({ stock }: Props) {
           </div>
           {a && (
             <p className="text-2xl font-semibold text-gray-800 mt-0.5">
-              ${fmt(a.price)}{" "}
+              {a.currency === "EUR" ? "€" : "$"}{fmt(a.price)}
+              {a.currency !== "USD" && a.priceUSD != null && (
+                <span style={{ fontSize: 13, fontWeight: 400, color: "var(--fg-5)", marginLeft: 5 }}>
+                  (~${fmt(a.priceUSD)})
+                </span>
+              )}
+              {" "}
               <span style={{ fontSize: 14, fontWeight: 500, marginLeft: 4, color: changeColor }}>
                 {a.changePercent >= 0 ? "+" : ""}
                 {fmt(a.changePercent)}%

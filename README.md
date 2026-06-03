@@ -61,6 +61,7 @@ El backend calcula y clasifica el Ratio PEG (Price/Earnings-to-Growth) siguiendo
 
 ### Gestión de cartera
 - **Hasta 20 acciones** — NYSE y NASDAQ, validadas en tiempo real contra Yahoo Finance antes de añadir. Con batch de 4, 20 acciones = 5 llamadas Gemini (~185s en el peor caso; requiere Vercel Pro o superior para el cron)
+- **Soporte multi-divisa (EUR/USD)** — Las acciones europeas (SAB.MC, NOVO-B.CO, etc.) detectan automáticamente su divisa nativa vía `meta.currency` de Yahoo Finance. El precio se almacena en EUR/GBP/etc. en `StockAnalysis.price` y se convierte a USD en `priceUSD` usando el tipo de cambio en tiempo real (EURUSD=X). El `StockCard` muestra `€X.XX (~$X.XX)` para acciones europeas. `PortfolioSummary` y `TaxHarvestingPanel` usan `priceUSD` para que el valor agregado de cartera y las pérdidas latentes estén siempre en USD, independientemente de la divisa de cotización
 - **P&L por posición** — Precio de compra, cantidad, fecha, coste base, valor actual, ganancia/pérdida en USD y %
 - **Historial de análisis** — Snapshots automáticos (escenario, RSI, precio) con retención de 30 días e índice DESC por fecha
 - **Análisis global de cartera** — Resumen IA de diversificación, riesgo agregado y recomendaciones de rebalanceo (mínimo 2 acciones con análisis)

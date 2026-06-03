@@ -31,6 +31,8 @@ export interface StockAnalysisModel {
   id: string;
   stockId: string;
   price: number;
+  priceUSD: number | null;
+  currency: string;
   changePercent: number;
   sma20: number | null;
   sma50: number | null;
@@ -57,6 +59,7 @@ export interface StockModel {
   purchasePrice: number | null;
   purchaseDate: Date | null;
   quantity: number | null;
+  currency: string;
   createdAt: Date;
 }
 

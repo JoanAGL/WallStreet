@@ -21,7 +21,7 @@ export default function TaxHarvestingPanel({ stocks, realizedLosses }: Props) {
     .map((s) => ({
       ticker:        s.ticker,
       purchasePrice: s.purchasePrice,
-      currentPrice:  s.analysis!.price,
+      currentPrice:  s.analysis!.priceUSD ?? s.analysis!.price,
       quantity:      s.quantity,
     }));
 
