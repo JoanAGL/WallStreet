@@ -131,7 +131,6 @@ export async function getDecisionAnalysis(userId: string): Promise<DecisionAnaly
     investedUSD:  number;
   }
   const trades: ClosedTrade[] = [];
-  const buyInvestments: { date: Date; amountUSD: number; stockId: string }[] = [];
 
   for (const [stockId, txs] of Array.from(byStock)) {
     const ticker  = tickerMap.get(stockId) ?? stockId;
@@ -151,7 +150,6 @@ export async function getDecisionAnalysis(userId: string): Promise<DecisionAnaly
         const total = avgCost * open + tx.price * tx.shares;
         open    = Math.round((open + tx.shares) * 1e6) / 1e6;
         avgCost = open > 0 ? total / open : 0;
-        buyInvestments.push({ date: txDate, amountUSD: tx.price * tx.shares, stockId });
       } else if (open > 0 && firstBuyDate) {
         const sellable   = Math.min(tx.shares, open);
         const invested   = Math.round(sellable * avgCost * 100) / 100;
@@ -220,14 +218,17 @@ export async function getDecisionAnalysis(userId: string): Promise<DecisionAnaly
   }
   prematureSales.sort((a, b) => b.missedProfit - a.missedProfit);
 
-  // S&P 500 Comparison
-  let totalInvested = 0, spySimulatedNow = 0;
-  for (const inv of buyInvestments) {
-    const spyAtBuy = getSpyPrice(inv.date);
-    spySimulatedNow += (inv.amountUSD / spyAtBuy) * SPY_NOW;
-    totalInvested   += inv.amountUSD;
+  // S&P 500 Comparison — based on CLOSED trades only.
+  // investedUSD = avgCost × shares (capital effectively risked in that trade).
+  // firstBuyDate is the entry date used to look up the SPY price at purchase.
+  let totalInvested = 0, spySimulatedNow = 0, portfolioRealized = 0;
+  for (const trade of trades) {
+    const spyAtEntry  = getSpyPrice(trade.firstBuyDate);
+    spySimulatedNow  += (trade.investedUSD / spyAtEntry) * SPY_NOW;
+    totalInvested    += trade.investedUSD;
+    portfolioRealized += trade.profitAmt;
   }
-  const totalRealizedProfit = Math.round(trades.reduce((s, t) => s + t.profitAmt, 0) * 100) / 100;
+  const totalRealizedProfit = Math.round(portfolioRealized * 100) / 100;
   const portfolioReturnPct  = totalInvested > 0
     ? Math.round((totalRealizedProfit / totalInvested) * 10000) / 100 : 0;
   const spyGain      = Math.round((spySimulatedNow - totalInvested) * 100) / 100;
