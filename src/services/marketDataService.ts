@@ -1,5 +1,5 @@
 import { fetchQuote } from "@/lib/finnhubClient";
-import { fetchYahooCandles, fetchTickerCurrency, fetchEURUSD } from "@/lib/yahooFinanceClient";
+import { fetchYahooCandles, fetchEURUSD } from "@/lib/yahooFinanceClient";
 
 export interface CurrentQuote {
   ticker:        string;

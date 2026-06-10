@@ -114,8 +114,8 @@ export default async function InsightsPage() {
                 Posiciones vendidas cuyo precio actual supera en más del 10% tu precio de venta:
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {analysis.prematureSales.map((ps) => (
-                  <div key={ps.ticker} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--card-inner)", border: "1px solid var(--card-border-inner)", borderRadius: 10, padding: "10px 14px" }}>
+                {analysis.prematureSales.map((ps, i) => (
+                  <div key={`${ps.ticker}-${ps.sellPrice}-${i}`} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--card-inner)", border: "1px solid var(--card-border-inner)", borderRadius: 10, padding: "10px 14px" }}>
                     <div>
                       <span style={{ fontSize: 14, fontWeight: 700, color: "var(--fg-1)" }}>{ps.ticker}</span>
                       <span style={{ fontSize: 12, color: "var(--fg-5)", marginLeft: 8 }}>

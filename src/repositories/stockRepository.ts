@@ -50,6 +50,20 @@ export async function countStocksByUser(userId: string): Promise<number> {
   return prisma.stock.count({ where: { userId } });
 }
 
+/**
+ * Counts only active positions: quantity > 0 (open) or null (added without
+ * purchase data). Fully-sold positions (quantity = 0, e.g. imported from
+ * DEGIRO) stay in the history but must not consume slots of the stock limit.
+ */
+export async function countActiveStocksByUser(userId: string): Promise<number> {
+  return prisma.stock.count({
+    where: {
+      userId,
+      OR: [{ quantity: null }, { quantity: { gt: 0 } }],
+    },
+  });
+}
+
 export async function findStockByTickerAndUser(
   ticker: string,
   userId: string

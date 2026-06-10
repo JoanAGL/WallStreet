@@ -1,7 +1,10 @@
 import { prisma }                from "@/lib/prisma";
 import { getTransactionsByUser } from "@/repositories/transactionRepository";
+import { cacheGet, cacheSet }    from "@/lib/cacheStore";
 
 // ── SPY price history for S&P 500 benchmark ───────────────────────────────────
+// Static FALLBACK table, used only when the live Yahoo history is unavailable
+// or the date precedes the downloaded range. Interpolated linearly.
 const SPY_HISTORY: [string, number][] = [
   ["2014-01-02", 184.69], ["2015-01-02", 205.71], ["2016-01-04", 201.02],
   ["2017-01-03", 225.24], ["2018-01-02", 267.56], ["2019-01-02", 249.92],
@@ -24,7 +27,68 @@ function getSpyPrice(date: Date): number {
   }
   return pts[pts.length - 1][1];
 }
-// SPY_NOW is resolved at runtime inside getDecisionAnalysis (live fetch with fallback)
+
+// ── Real SPY daily history (Yahoo Finance, cached 24h) ────────────────────────
+
+interface SpyHistory {
+  timestamps: number[];  // ms epoch, oldest-first, aligned with closes
+  closes:     number[];
+}
+
+const SPY_CACHE_KEY = "spy:history:3y";
+const SPY_CACHE_TTL = 24 * 3600; // seconds
+
+async function fetchSpyHistory(): Promise<SpyHistory | null> {
+  try {
+    const url = "https://query2.finance.yahoo.com/v8/finance/chart/SPY?interval=1d&range=3y";
+    const res = await fetch(url, {
+      headers: { "User-Agent": YAHOO_UA },
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as {
+      chart: { result: [{ timestamp?: number[]; indicators: { quote: [{ close: (number | null)[] }] } }] | null };
+    };
+    const r      = data.chart.result?.[0];
+    const ts     = r?.timestamp ?? [];
+    const closes = r?.indicators?.quote?.[0]?.close ?? [];
+    const t: number[] = [];
+    const c: number[] = [];
+    for (let i = 0; i < ts.length; i++) {
+      const v = closes[i];
+      if (v != null && v > 0) {
+        t.push(ts[i] * 1000);
+        c.push(v);
+      }
+    }
+    return t.length >= 2 ? { timestamps: t, closes: c } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getSpyHistory(): Promise<SpyHistory | null> {
+  const cached = await cacheGet<SpyHistory>(SPY_CACHE_KEY);
+  if (cached) return cached;
+  const live = await fetchSpyHistory();
+  if (live) await cacheSet(SPY_CACHE_KEY, live, SPY_CACHE_TTL);
+  return live;
+}
+
+/** Close of the last trading day ≤ date; falls back to the interpolated table. */
+function spyPriceAt(history: SpyHistory | null, date: Date): number {
+  if (!history) return getSpyPrice(date);
+  const ts = date.getTime();
+  const { timestamps, closes } = history;
+  if (ts < timestamps[0]) return getSpyPrice(date); // older than downloaded range
+  let lo = 0, hi = timestamps.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (timestamps[mid] <= ts) lo = mid;
+    else hi = mid - 1;
+  }
+  return closes[lo];
+}
 
 // ── Live price fetch from Yahoo Finance ───────────────────────────────────────
 const YAHOO_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
@@ -99,19 +163,21 @@ export interface DecisionAnalysis {
 // ── Main analysis ─────────────────────────────────────────────────────────────
 
 export async function getDecisionAnalysis(userId: string): Promise<DecisionAnalysis> {
-  // Fetch live SPY price for an accurate benchmark; fall back to interpolated history
-  const spyLive = await fetchCurrentPrice("SPY");
-  const SPY_NOW = spyLive ?? getSpyPrice(new Date());
+  // Real SPY daily history (cached 24h) for an accurate benchmark
+  const spyHistory = await getSpyHistory();
 
   const allTxs = await getTransactionsByUser(userId);
 
   const stocks = await prisma.stock.findMany({
     where:  { userId },
-    select: { id: true, ticker: true, analysis: { select: { price: true } } },
+    select: { id: true, ticker: true, analysis: { select: { price: true, priceUSD: true } } },
   });
   const tickerMap    = new Map(stocks.map((s) => [s.id, s.ticker]));
+  // Siempre en USD (las transacciones se almacenan en USD); precio 0 = degradado
   const cachedPrice  = new Map(
-    stocks.filter((s) => s.analysis?.price).map((s) => [s.id, s.analysis!.price!])
+    stocks
+      .map((s) => [s.id, s.analysis ? (s.analysis.priceUSD ?? s.analysis.price) : 0] as [string, number])
+      .filter(([, p]) => p > 0)
   );
 
   // Group transactions by stock
@@ -222,13 +288,15 @@ export async function getDecisionAnalysis(userId: string): Promise<DecisionAnaly
   }
   prematureSales.sort((a, b) => b.missedProfit - a.missedProfit);
 
-  // S&P 500 Comparison — based on CLOSED trades only.
-  // investedUSD = avgCost × shares (capital effectively risked in that trade).
-  // firstBuyDate is the entry date used to look up the SPY price at purchase.
+  // S&P 500 Comparison — based on CLOSED trades only, over the SAME holding
+  // period: the simulated SPY position is bought at firstBuyDate and sold at
+  // sellDate of each trade. Comparing realized P&L against SPY held to today
+  // (the previous approach) mixed horizons and penalized old exits unfairly.
   let totalInvested = 0, spySimulatedNow = 0, portfolioRealized = 0;
   for (const trade of trades) {
-    const spyAtEntry  = getSpyPrice(trade.firstBuyDate);
-    spySimulatedNow  += (trade.investedUSD / spyAtEntry) * SPY_NOW;
+    const spyAtEntry  = spyPriceAt(spyHistory, trade.firstBuyDate);
+    const spyAtExit   = spyPriceAt(spyHistory, trade.sellDate);
+    spySimulatedNow  += (trade.investedUSD / spyAtEntry) * spyAtExit;
     totalInvested    += trade.investedUSD;
     portfolioRealized += trade.profitAmt;
   }

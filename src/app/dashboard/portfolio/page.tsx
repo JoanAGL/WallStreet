@@ -11,13 +11,19 @@ export default async function PortfolioPage() {
   const session = await getServerSession(authOptions);
   if (!session) redirect("/login");
 
-  // Build currentPrices map from latest StockAnalysis per stock
+  // Build currentPrices map from latest StockAnalysis per stock.
+  // Always in USD (priceUSD for European stocks); a price of 0 means the
+  // market data is degraded — treat it as "no price" so the position shows
+  // as sin precio instead of a fake −100% unrealized loss.
   const analyses = await prisma.stockAnalysis.findMany({
     where:   { stock: { userId: session.user.id } },
-    select:  { stockId: true, price: true },
+    select:  { stockId: true, price: true, priceUSD: true },
   });
   const currentPrices: Record<string, number> = {};
-  for (const a of analyses) currentPrices[a.stockId] = a.price;
+  for (const a of analyses) {
+    const usd = a.priceUSD ?? a.price;
+    if (usd > 0) currentPrices[a.stockId] = usd;
+  }
 
   const summary = await getPortfolioMetrics(session.user.id, currentPrices);
 
@@ -29,6 +35,9 @@ export default async function PortfolioPage() {
     n == null ? "text-gray-500" : n >= 0 ? "text-green-600 font-bold" : "text-red-600 font-bold";
 
   const hasPositions = summary.positions.length > 0;
+  const unpriced = summary.positions.filter(
+    (p) => p.openShares > 0 && p.currentValue == null
+  );
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
@@ -69,6 +78,13 @@ export default async function PortfolioPage() {
             />
           </div>
 
+          {unpriced.length > 0 && (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              ⚠ Sin precio de mercado — excluidas del valor actual y del PnL no realizado:{" "}
+              {unpriced.map((p) => p.ticker).join(", ")}. Pulsa «Actualizar datos» en el dashboard.
+            </p>
+          )}
+
           {/* ── Per-position cards ── */}
           <div className="space-y-4">
             {summary.positions
@@ -86,7 +102,7 @@ export default async function PortfolioPage() {
                         </span>
                       )}
                       {pos.openShares > 0 && (
-                        <span className="text-xs text-gray-500">{pos.openShares} acciones</span>
+                        <span className="text-xs text-gray-500">{pos.openShares} {pos.openShares === 1 ? "acción" : "acciones"}</span>
                       )}
                     </div>
                     {pos.currentValue != null && (
@@ -129,7 +145,7 @@ export default async function PortfolioPage() {
                   {pos.transactions.length > 0 && (
                     <details className="text-xs">
                       <summary className="cursor-pointer text-gray-500 hover:text-gray-700 select-none">
-                        {pos.transactions.length} transacción{pos.transactions.length !== 1 ? "es" : ""}
+                        {pos.transactions.length} {pos.transactions.length === 1 ? "transacción" : "transacciones"}
                       </summary>
                       <div className="mt-2 space-y-1.5">
                         {[...pos.transactions]

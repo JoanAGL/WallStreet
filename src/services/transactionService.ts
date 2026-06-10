@@ -28,9 +28,9 @@ export interface PositionMetrics {
   unrealizedPnLPct:    number | null;   // (unrealizedPnL / openCostBasis) × 100
   realizedPnL:         number;          // Σ (sellPrice − avgCostAtSale) × shares
   realizedPnLPct:      number | null;   // realizedPnL / soldCostBasis × 100
-  breakEvenPrice:      number | null;   // = avgBuyPrice
-  daysHeld:            number | null;   // from first transaction date to today
-  annualizedReturn:    number | null;   // CAGR % — null when daysHeld ≤ 0
+  breakEvenPrice:      number | null;   // price where total P&L = 0: (openCostBasis − realizedPnL) / openShares
+  daysHeld:            number | null;   // first transaction → today (open) or last transaction (closed)
+  annualizedReturn:    number | null;   // CAGR % — null when daysHeld < MIN_DAYS_FOR_CAGR
   portfolioWeightPct:  number | null;   // set at portfolio level
   transactions:        TransactionRecord[];
 }
@@ -49,6 +49,10 @@ export interface PortfolioSummary {
 function r2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+// Below this holding period the CAGR extrapolation is meaningless
+// (e.g. −16% in 8 days annualizes to −99.97%), so it is suppressed.
+const MIN_DAYS_FOR_CAGR = 30;
 
 // ── Core WAC computation ──────────────────────────────────────────────────────
 
@@ -78,10 +82,12 @@ export function calculatePositionMetrics(
   let totalSoldShrs  = 0;
   let sellWeightedP  = 0;   // Σ (sellShares × sellPrice) for avg sell price
   let firstDate: Date | null = null;
+  let lastDate:  Date | null = null;
 
   for (const tx of sorted) {
     const txDate = tx.date ?? tx.createdAt;
     if (!firstDate || txDate < firstDate) firstDate = txDate;
+    if (!lastDate  || txDate > lastDate)  lastDate  = txDate;
 
     if (tx.type === "BUY") {
       const totalCost  = avgCost * openShares + tx.price * tx.shares;
@@ -111,20 +117,31 @@ export function calculatePositionMetrics(
   const realizedPnLPct  = soldCostBasis > 0
     ? r2((realizedPnL / soldCostBasis) * 100) : null;
 
-  // Days held from first transaction to today
+  // Days held: first transaction → today while open, → last transaction once closed
+  const isClosed = openShares <= 1e-9;
+  const endTime  = isClosed && lastDate ? lastDate.getTime() : Date.now();
   const daysHeld = firstDate
-    ? Math.max(0, Math.floor((Date.now() - firstDate.getTime()) / 86_400_000))
+    ? Math.max(0, Math.floor((endTime - firstDate.getTime()) / 86_400_000))
     : null;
 
-  // CAGR: ((currentValue + realizedPnL) / totalBuyAmt)^(365/days) − 1
+  // CAGR over total invested capital. Final wealth must include the sale
+  // proceeds (cost recovered + profit), not just the realized P&L — otherwise
+  // any position with sells understates the ratio and the CAGR goes deeply
+  // negative even on winning trades.
   let annualizedReturn: number | null = null;
-  if (daysHeld != null && daysHeld > 0 && totalBuyAmt > 0) {
-    const totalFinal = (currentValue ?? openCostBasis) + realizedPnL;
+  if (daysHeld != null && daysHeld >= MIN_DAYS_FOR_CAGR && totalBuyAmt > 0) {
+    const totalFinal = (currentValue ?? openCostBasis) + totalSellAmt;
     const ratio      = totalFinal / totalBuyAmt;
     if (ratio > 0) {
       annualizedReturn = r2((Math.pow(ratio, 365 / daysHeld) - 1) * 100);
     }
   }
+
+  // Break-even: sale price of the open shares at which total P&L is zero,
+  // i.e. realized profits already cushion part of the remaining cost.
+  const breakEvenPrice = openShares > 1e-9
+    ? r2(Math.max(0, (avgCost * openShares - realizedPnL) / openShares))
+    : null;
 
   return {
     stockId,
@@ -140,7 +157,7 @@ export function calculatePositionMetrics(
     unrealizedPnLPct,
     realizedPnL,
     realizedPnLPct,
-    breakEvenPrice:     avgBuyPrice,
+    breakEvenPrice,
     daysHeld,
     annualizedReturn,
     portfolioWeightPct: null,

@@ -57,9 +57,16 @@ export default function PortfolioSummary({ stocks, realizedPnL }: Props) {
            s.analysis?.price != null && s.analysis.price > 0 &&
            (s.purchasePrice == null || s.purchasePrice <= 0)
   );
-  const totalCost    = withPosition.reduce((sum, s) => sum + s.purchasePrice! * s.quantity!, 0);
-  const totalValue   = withPosition.reduce((sum, s) => sum + (s.analysis?.priceUSD ?? s.analysis?.price ?? 0) * s.quantity!, 0);
-  const totalPnl     = withPosition.length > 0 ? totalValue - totalCost : null;
+  // Solo posiciones con precio de mercado válido: las que cotizan a 0 (datos
+  // degradados) se excluyen también del coste — si entraran en «Invertido»
+  // pero no en «Valor», el PnL las contaría como pérdida del −100%,
+  // contradiciendo el aviso de "no suman al valor ni al P&L".
+  const priced       = withPosition.filter(
+    (s) => (s.analysis?.priceUSD ?? s.analysis?.price ?? 0) > 0
+  );
+  const totalCost    = priced.reduce((sum, s) => sum + s.purchasePrice! * s.quantity!, 0);
+  const totalValue   = priced.reduce((sum, s) => sum + (s.analysis?.priceUSD ?? s.analysis?.price ?? 0) * s.quantity!, 0);
+  const totalPnl     = priced.length > 0 ? totalValue - totalCost : null;
   const totalPnlPct  = totalPnl != null && totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
 
   const leanPos = positivo > negativo;

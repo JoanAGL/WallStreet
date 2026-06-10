@@ -1,9 +1,15 @@
-import type { StockWithAnalysis } from "@/types/models";
 import type { SellHistoryEntry } from "@/services/transactionService";
 import { detectHarvestOpportunities } from "@/lib/portfolioMath";
 
+export interface HarvestCandidate {
+  ticker:        string;
+  purchasePrice: number | null;   // WAC de transacciones, o purchasePrice del Stock
+  currentPrice:  number;
+  quantity:      number | null;
+}
+
 interface Props {
-  stocks:         StockWithAnalysis[];
+  candidates:     HarvestCandidate[];
   realizedLosses: SellHistoryEntry[];   // losses confirmed this fiscal year (profitAmount < 0)
 }
 
@@ -13,17 +19,8 @@ function fmtMoney(n: number): string {
   });
 }
 
-export default function TaxHarvestingPanel({ stocks, realizedLosses }: Props) {
+export default function TaxHarvestingPanel({ candidates, realizedLosses }: Props) {
   const currentYear = new Date().getFullYear();
-
-  const candidates = stocks
-    .filter((s) => s.analysis)
-    .map((s) => ({
-      ticker:        s.ticker,
-      purchasePrice: s.purchasePrice,
-      currentPrice:  s.analysis!.priceUSD ?? s.analysis!.price,
-      quantity:      s.quantity,
-    }));
 
   const alerts = detectHarvestOpportunities(candidates);
 

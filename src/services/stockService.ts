@@ -1,6 +1,6 @@
 import {
   getStocksByUser,
-  countStocksByUser,
+  countActiveStocksByUser,
   findStockByTickerAndUser,
   addStock,
   updateStockHorizon,
@@ -38,11 +38,13 @@ export async function addUserStock(
     };
   }
 
-  const count = await countStocksByUser(userId);
+  // Solo las posiciones activas consumen plazas: las cerradas (quantity = 0)
+  // permanecen como histórico sin bloquear nuevas incorporaciones.
+  const count = await countActiveStocksByUser(userId);
   if (count >= MAX_STOCKS) {
     return {
       success: false,
-      error: `Límite alcanzado. Máximo ${MAX_STOCKS} acciones por usuario.`,
+      error: `Límite alcanzado. Máximo ${MAX_STOCKS} acciones activas por usuario.`,
       status: 409,
     };
   }

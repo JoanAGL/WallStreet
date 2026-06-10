@@ -97,10 +97,15 @@ export async function GET() {
   const currentValues: Record<string, number> = {};
 
   historicalResults.forEach((r, i) => {
+    const s = withAnalysis[i];
+    const priceUSD = s.analysis?.priceUSD ?? s.analysis?.price ?? 0;
+    // Sin precio de mercado fiable no hay peso actual válido y recomendar
+    // asignarle capital es engañoso (activos degradados cotizando a 0).
+    // Las posiciones cerradas (quantity = 0) ya no forman parte de la cartera.
+    if (priceUSD <= 0 || s.quantity === 0) return;
     if (r.status === "fulfilled" && r.value.closes.length >= 10) {
-      const s = withAnalysis[i];
       historicalData[s.ticker] = r.value.closes;
-      currentValues[s.ticker] = (s.analysis?.price ?? 0) * (s.quantity ?? 1);
+      currentValues[s.ticker] = priceUSD * (s.quantity ?? 1);
     }
   });
 

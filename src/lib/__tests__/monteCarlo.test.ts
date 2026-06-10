@@ -62,3 +62,28 @@ describe("runMonteCarlo — distribution param", () => {
     expect(result.probabilityOfLoss).toBeLessThanOrEqual(1);
   });
 });
+
+// ── Student-t variance scaling inside runMonteCarlo ──────────────────────────
+// The raw t(5) sample has variance 5/3; the simulation must scale it to unit
+// variance so the realized vol matches sigma and the median is not biased down.
+
+describe("runMonteCarlo — Student-t variance scaling", () => {
+  it("scaled t(5) shock has variance ≈ 1", () => {
+    const N = 100_000;
+    const scale = Math.sqrt(3 / 5);
+    const samples = Array.from({ length: N }, () => sampleStudentT(5) * scale);
+    const mean = samples.reduce((s, v) => s + v, 0) / N;
+    const variance = samples.reduce((s, v) => s + (v - mean) ** 2, 0) / N;
+    expect(Math.abs(variance - 1)).toBeLessThan(0.1);
+  });
+
+  it("STUDENT_T median ≈ NORMAL median (sin sesgo bajista por varianza inflada)", () => {
+    const common = [0.0003, 0.015, 10000, 252, 0, 4000] as const;
+    const student = runMonteCarlo(...common, "STUDENT_T", 5);
+    const normal  = runMonteCarlo(...common, "NORMAL");
+    const medianT = student.p50[student.p50.length - 1];
+    const medianN = normal.p50[normal.p50.length - 1];
+    // Antes del escalado la mediana t quedaba ~4% por debajo sistemáticamente
+    expect(Math.abs(medianT - medianN) / medianN).toBeLessThan(0.05);
+  });
+});
