@@ -66,13 +66,22 @@ export function runMonteCarlo(
   const paths: number[][] = [];
   const tradingDaysPerMonth = 21;
 
+  // Student-t with df degrees of freedom has variance df/(df-2), not 1.
+  // Scale the shock to unit variance so the realized volatility matches the
+  // estimated sigma (fat tails are preserved) and the Itô drift correction
+  // −σ²/2 stays consistent. Without this the effective vol is inflated ~29%
+  // for df=5 and the whole distribution is biased downward.
+  const tScale = degreesOfFreedom > 2
+    ? Math.sqrt((degreesOfFreedom - 2) / degreesOfFreedom)
+    : 1;
+
   for (let sim = 0; sim < simulations; sim++) {
     const path: number[] = [S0];
     let value = S0;
     for (let d = 1; d <= horizonDays; d++) {
       const sample = distribution === 'NORMAL'
         ? sampleNormal()
-        : sampleStudentT(degreesOfFreedom);
+        : sampleStudentT(degreesOfFreedom) * tScale;
       value *= Math.exp((mu - (sigma * sigma) / 2) + sigma * sample);
       if (monthlyContribution > 0 && d % tradingDaysPerMonth === 0) {
         value += monthlyContribution;
