@@ -94,7 +94,8 @@ export default async function DashboardPage() {
         <p className="text-sm font-medium text-gray-700 mb-3">
           Añadir acción (NYSE / NASDAQ)
         </p>
-        <AddStockForm currentCount={stocks.length} />
+        {/* Solo posiciones activas consumen el límite (igual que stockService) */}
+        <AddStockForm currentCount={stocks.filter((s) => s.quantity == null || s.quantity > 0).length} />
       </div>
 
       <TopMovers />
