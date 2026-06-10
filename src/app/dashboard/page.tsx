@@ -27,10 +27,14 @@ export default async function DashboardPage() {
     getPortfolioAnalysis(session.user.id),
     prisma.stockAnalysis.findMany({
       where:  { stock: { userId: session.user.id } },
-      select: { stockId: true, price: true },
+      select: { stockId: true, price: true, priceUSD: true },
     }).then(async (analyses) => {
+      // Siempre en USD; precio 0 = dato degradado, se trata como sin precio
       const currentPrices: Record<string, number> = {};
-      for (const a of analyses) currentPrices[a.stockId] = a.price;
+      for (const a of analyses) {
+        const usd = a.priceUSD ?? a.price;
+        if (usd > 0) currentPrices[a.stockId] = usd;
+      }
       return getPortfolioMetrics(session.user.id, currentPrices);
     }),
     getTransactionHistory(session.user.id),
@@ -43,6 +47,23 @@ export default async function DashboardPage() {
 
   const openStocks     = stocks.filter((s) => s.quantity != null && s.quantity > 0);
   const historicStocks = stocks.filter((s) => s.quantity == null || s.quantity <= 0);
+
+  // Candidatos de tax harvesting con la misma fuente de verdad que Rendimiento:
+  // WAC de transacciones cuando existe; fallback a purchasePrice/quantity del
+  // Stock para posiciones sin transacciones registradas.
+  const wacByStockId = new Map(portfolioMetrics.positions.map((p) => [p.stockId, p]));
+  const harvestCandidates = stocks
+    .filter((s) => s.analysis)
+    .map((s) => {
+      const wac = wacByStockId.get(s.id);
+      const useWac = wac != null && wac.openShares > 0 && wac.avgBuyPrice != null;
+      return {
+        ticker:        s.ticker,
+        purchasePrice: useWac ? wac.avgBuyPrice : s.purchasePrice,
+        currentPrice:  s.analysis!.priceUSD ?? s.analysis!.price,
+        quantity:      useWac ? wac.openShares : s.quantity,
+      };
+    });
 
   const lastUpdatedAt = stocks
     .map((s) => s.analysis?.updatedAt)
@@ -78,7 +99,7 @@ export default async function DashboardPage() {
 
       <PortfolioBenchmark stocks={stocks} />
 
-      <TaxHarvestingPanel stocks={stocks} realizedLosses={realizedLosses} />
+      <TaxHarvestingPanel candidates={harvestCandidates} realizedLosses={realizedLosses} />
 
       {stocksWithAnalysis >= 2 && <CorrelationMatrix />}
 
