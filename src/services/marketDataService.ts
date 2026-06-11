@@ -75,10 +75,19 @@ async function getQuoteFromYahoo(ticker: string): Promise<CurrentQuote | null> {
 }
 
 export async function getCurrentQuote(ticker: string): Promise<CurrentQuote> {
-  const quote = await fetchQuote(ticker);
+  // Finnhub no cubre acciones europeas: según el día devuelve c:0 (200 OK) o
+  // directamente 403/429 (excepción). Cualquiera de los dos casos debe caer
+  // al fallback de Yahoo — si solo se comprueba c<=0, una excepción de
+  // Finnhub se propaga y el fallback nunca llega a ejecutarse (SAB.MC y
+  // NOVO-B.CO quedaban con precio 0 permanente).
+  let quote: Awaited<ReturnType<typeof fetchQuote>> | null = null;
+  try {
+    quote = await fetchQuote(ticker);
+  } catch (err) {
+    console.warn(`[getCurrentQuote] Finnhub failed for ${ticker}, trying Yahoo:`, err);
+  }
 
-  // Finnhub no cubre acciones europeas — devuelve c:0 para SAB.MC, NOVO-B.CO, etc.
-  if (!quote.c || quote.c <= 0) {
+  if (!quote || !quote.c || quote.c <= 0) {
     const yahooQuote = await getQuoteFromYahoo(ticker);
     if (yahooQuote) {
       console.log(`[getCurrentQuote] Yahoo OK for ${ticker}: ${yahooQuote.price} ${yahooQuote.currency}`);
