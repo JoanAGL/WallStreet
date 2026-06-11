@@ -1,5 +1,5 @@
 import { fetchQuote } from "@/lib/finnhubClient";
-import { fetchYahooCandles, fetchEURUSD } from "@/lib/yahooFinanceClient";
+import { fetchYahooCandles, fetchFxToUSD } from "@/lib/yahooFinanceClient";
 
 export interface CurrentQuote {
   ticker:        string;
@@ -64,7 +64,15 @@ async function getQuoteFromYahoo(ticker: string): Promise<CurrentQuote | null> {
 
     let priceUSD = price;
     if (currency !== "USD") {
-      const fxRate = await fetchEURUSD().catch(() => 1.10);
+      // Tipo de cambio de la divisa REAL de cotización (DKK, EUR, GBp...).
+      // Antes se aplicaba siempre EURUSD: NOVO-B.CO (DKK) salía a ~$279
+      // en vez de ~$40. Si el FX no está disponible, mejor fallar (y que
+      // el orquestador conserve el último precio bueno) que valorar mal.
+      const fxRate = await fetchFxToUSD(currency).catch(() => null);
+      if (fxRate == null) {
+        console.warn(`[getQuoteFromYahoo] Sin FX ${currency}→USD para ${ticker}`);
+        return null;
+      }
       priceUSD = Math.round(price * fxRate * 10000) / 10000;
     }
 
