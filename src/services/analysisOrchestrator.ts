@@ -1,5 +1,6 @@
 import { getCurrentQuote, getHistoricalCloses } from "./marketDataService";
 import type { CurrentQuote, HistoricalData } from "./marketDataService";
+import { detectAndRegisterSplits } from "./splitDetectionService";
 import { withTimeout } from "@/lib/withTimeout";
 import { calculateIndicators } from "./technicalAnalysisService";
 import { analyzeNewsForTicker, fetchAllArticlesInParallel, batchAnalyzeSentiment } from "./newsAnalysisService";
@@ -256,6 +257,15 @@ async function runFullAnalysis(
 
   if (staleStocks.length === 0) return finalResults;
   console.log(`[ORCHESTRATOR] ${staleStocks.length} stale / ${finalResults.length} cached (force=${forceUpdate})`);
+
+  // Phase 1.5: detección automática de splits corporativos (Yahoo, caché 24h
+  // por ticker). Registra transacciones SPLIT pendientes antes de calcular
+  // métricas para que el WAC ya refleje el ajuste. Nunca bloquea el pipeline.
+  try {
+    await detectAndRegisterSplits(staleStocks.map((s) => ({ id: s.id, ticker: s.ticker })));
+  } catch (err) {
+    console.warn("[ORCHESTRATOR] Detección de splits falló (continuando):", err);
+  }
 
   // Phase 2: Market data + fundamentals (parallel, individual timeouts per source)
   // Each source is wrapped with withTimeout so a single slow API cannot block
