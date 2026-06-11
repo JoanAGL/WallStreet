@@ -199,6 +199,28 @@ export function calculatePositionMetrics(
 
 // ── Service functions ─────────────────────────────────────────────────────────
 
+/**
+ * Sincroniza Stock.quantity / purchasePrice con el WAC de las transacciones.
+ * Sin esto, el resumen del dashboard (que lee esos campos) divergiría de
+ * Rendimiento tras registrar compras, ventas o splits desde el panel.
+ * Si la posición no tiene transacciones, no se pisa el dato manual.
+ */
+export async function syncStockPosition(stockId: string): Promise<void> {
+  const txs = await getTransactionsByStock(stockId);
+  if (txs.length === 0) return;
+  const m = calculatePositionMetrics(txs, stockId, "", null);
+  const { prisma } = await import("@/lib/prisma");
+  await prisma.stock.update({
+    where: { id: stockId },
+    data:  {
+      quantity:      m.openShares,
+      purchasePrice: m.avgBuyPrice,
+    },
+  }).catch((err: unknown) => {
+    console.warn(`[syncStockPosition] No se pudo sincronizar ${stockId}:`, err);
+  });
+}
+
 export async function addTransaction(
   userId:  string,
   stockId: string,
@@ -239,7 +261,7 @@ export async function addTransaction(
     }
   }
 
-  return createTransaction({
+  const tx = await createTransaction({
     stockId,
     type,
     shares,
@@ -248,6 +270,8 @@ export async function addTransaction(
     date:  date ?? null,
     notes: notes ?? null,
   });
+  await syncStockPosition(stockId);
+  return tx;
 }
 
 export interface TransactionPatch {
@@ -289,7 +313,9 @@ export async function editUserTransaction(
     }
   }
 
-  return updateTransaction(transactionId, patch);
+  const updated = await updateTransaction(transactionId, patch);
+  await syncStockPosition(tx.stockId);
+  return updated;
 }
 
 export async function deleteUserTransaction(
@@ -299,6 +325,7 @@ export async function deleteUserTransaction(
   const tx = await findTransactionByIdAndUser(transactionId, userId);
   if (!tx) throw new Error("Transacción no encontrada o no pertenece al usuario.");
   await deleteTransaction(transactionId);
+  await syncStockPosition(tx.stockId);
 }
 
 export async function getStockMetrics(

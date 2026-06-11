@@ -223,11 +223,19 @@ export default function StockCard({ stock }: Props) {
               <span className={`px-2.5 py-1 rounded-full text-xs font-bold tracking-wide ${actionStyle.badge}`}>
                 {actionStyle.label}
               </span>
-              {prescriptiveAction.executionPriceLimit > 0 && (
-                <span className="text-xs text-gray-500">
-                  Nivel ref. <span className="font-semibold text-gray-700">${prescriptiveAction.executionPriceLimit.toFixed(2)}</span>
-                </span>
-              )}
+              {prescriptiveAction.executionPriceLimit > 0 && (() => {
+                // El nivel de referencia está en la divisa de cotización del
+                // activo, no siempre en USD (Novo: 280 DKK, no $280)
+                const SYMBOLS: Record<string, string> = { USD: "$", EUR: "€", GBP: "£", GBp: "£" };
+                const cur = a?.currency ?? "USD";
+                const sym = SYMBOLS[cur];
+                const lvl = prescriptiveAction.executionPriceLimit.toFixed(2);
+                return (
+                  <span className="text-xs text-gray-500">
+                    Nivel ref. <span className="font-semibold text-gray-700">{sym ? `${sym}${lvl}` : `${lvl} ${cur}`}</span>
+                  </span>
+                );
+              })()}
             </div>
             <span className="text-xs text-gray-400">
               ~{prescriptiveAction.estimatedHorizonDays}d
