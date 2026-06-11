@@ -134,6 +134,8 @@ model StockAnalysisHistory {
 enum TransactionType {
   BUY
   SELL
+  SPLIT
+  DIVIDEND
 }
 
 model Transaction {
@@ -143,6 +145,7 @@ model Transaction {
   type      TransactionType
   shares    Float
   price     Float           // average price per share for this transaction
+  fee       Float           @default(0) // commission (BUY/SELL) or withholding (DIVIDEND), USD
   date      DateTime?       // optional acquisition / sale date
   notes     String?         // optional free-text annotation
   createdAt DateTime        @default(now())

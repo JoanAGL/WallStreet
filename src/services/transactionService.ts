@@ -26,9 +26,11 @@ export interface PositionMetrics {
   currentValue:        number | null;   // openShares × currentPrice
   unrealizedPnL:       number | null;   // currentValue − openCostBasis
   unrealizedPnLPct:    number | null;   // (unrealizedPnL / openCostBasis) × 100
-  realizedPnL:         number;          // Σ (sellPrice − avgCostAtSale) × shares
+  realizedPnL:         number;          // Σ (netSellPrice − avgCostAtSale) × shares, neto de comisiones
   realizedPnLPct:      number | null;   // realizedPnL / soldCostBasis × 100
-  breakEvenPrice:      number | null;   // price where total P&L = 0: (openCostBasis − realizedPnL) / openShares
+  totalDividends:      number;          // Σ dividendos netos cobrados (bruto − retención)
+  totalFees:           number;          // Σ comisiones de compra/venta + retenciones de dividendos
+  breakEvenPrice:      number | null;   // price where total P&L = 0 (incluye realizado y dividendos)
   daysHeld:            number | null;   // first transaction → today (open) or last transaction (closed)
   annualizedReturn:    number | null;   // CAGR % — null when daysHeld < MIN_DAYS_FOR_CAGR
   portfolioWeightPct:  number | null;   // set at portfolio level
@@ -81,28 +83,55 @@ export function calculatePositionMetrics(
   let totalSellAmt   = 0;
   let totalSoldShrs  = 0;
   let sellWeightedP  = 0;   // Σ (sellShares × sellPrice) for avg sell price
+  let totalDividends = 0;   // dividendos netos (bruto − retención)
+  let totalFees      = 0;   // comisiones + retenciones
   let firstDate: Date | null = null;
   let lastDate:  Date | null = null;
 
   for (const tx of sorted) {
     const txDate = tx.date ?? tx.createdAt;
+    const fee    = tx.fee ?? 0;
+
+    if (tx.type === "SPLIT") {
+      // shares = factor (10 → 10:1, 0.1 → contrasplit 1:10). Multiplica las
+      // acciones abiertas y divide el coste medio: el capital no cambia.
+      // No toca firstDate/lastDate: un split no es una operación de cartera.
+      if (tx.shares > 0 && openShares > 1e-9) {
+        openShares = r2(openShares * tx.shares);
+        avgCost    = avgCost / tx.shares;
+      }
+      continue;
+    }
+
+    if (tx.type === "DIVIDEND") {
+      // shares × price = importe bruto; fee = retención. No altera la posición
+      // ni sus fechas: el dividendo es renta dentro del período de tenencia.
+      totalDividends = r2(totalDividends + tx.shares * tx.price - fee);
+      totalFees      = r2(totalFees + fee);
+      continue;
+    }
+
     if (!firstDate || txDate < firstDate) firstDate = txDate;
     if (!lastDate  || txDate > lastDate)  lastDate  = txDate;
 
     if (tx.type === "BUY") {
-      const totalCost  = avgCost * openShares + tx.price * tx.shares;
+      // La comisión de compra se capitaliza en el coste base (criterio fiscal)
+      const totalCost  = avgCost * openShares + tx.price * tx.shares + fee;
       openShares       = r2(openShares + tx.shares);
       avgCost          = openShares > 0 ? totalCost / openShares : 0;
-      totalBuyAmt      = r2(totalBuyAmt + tx.price * tx.shares);
+      totalBuyAmt      = r2(totalBuyAmt + tx.price * tx.shares + fee);
+      totalFees        = r2(totalFees + fee);
     } else {
+      // La comisión de venta reduce el importe obtenido (P&L neto)
       const sellableShares = Math.min(tx.shares, openShares);
-      const profit     = sellableShares * (tx.price - avgCost);
+      const profit     = sellableShares * (tx.price - avgCost) - fee;
       realizedPnL      = r2(realizedPnL + profit);
       soldCostBasis    = r2(soldCostBasis + sellableShares * avgCost);
       openShares       = r2(Math.max(0, openShares - sellableShares));
-      totalSellAmt     = r2(totalSellAmt + tx.price * sellableShares);
+      totalSellAmt     = r2(totalSellAmt + tx.price * sellableShares - fee);
       totalSoldShrs    = r2(totalSoldShrs + sellableShares);
       sellWeightedP   += tx.price * sellableShares;
+      totalFees        = r2(totalFees + fee);
     }
   }
 
@@ -130,17 +159,18 @@ export function calculatePositionMetrics(
   // negative even on winning trades.
   let annualizedReturn: number | null = null;
   if (daysHeld != null && daysHeld >= MIN_DAYS_FOR_CAGR && totalBuyAmt > 0) {
-    const totalFinal = (currentValue ?? openCostBasis) + totalSellAmt;
+    // Riqueza final = valor abierto + proceeds netos de ventas + dividendos netos
+    const totalFinal = (currentValue ?? openCostBasis) + totalSellAmt + totalDividends;
     const ratio      = totalFinal / totalBuyAmt;
     if (ratio > 0) {
       annualizedReturn = r2((Math.pow(ratio, 365 / daysHeld) - 1) * 100);
     }
   }
 
-  // Break-even: sale price of the open shares at which total P&L is zero,
-  // i.e. realized profits already cushion part of the remaining cost.
+  // Break-even: sale price of the open shares at which total P&L is zero —
+  // realized profits and net dividends already cushion part of the cost.
   const breakEvenPrice = openShares > 1e-9
-    ? r2(Math.max(0, (avgCost * openShares - realizedPnL) / openShares))
+    ? r2(Math.max(0, (avgCost * openShares - realizedPnL - totalDividends) / openShares))
     : null;
 
   return {
@@ -157,6 +187,8 @@ export function calculatePositionMetrics(
     unrealizedPnLPct,
     realizedPnL,
     realizedPnLPct,
+    totalDividends,
+    totalFees,
     breakEvenPrice,
     daysHeld,
     annualizedReturn,
@@ -174,10 +206,25 @@ export async function addTransaction(
   shares:  number,
   price:   number,
   date?:   Date | null,
-  notes?:  string | null
+  notes?:  string | null,
+  fee?:    number
 ): Promise<TransactionRecord> {
-  if (shares <= 0 || !isFinite(shares)) throw new Error("Las acciones deben ser un número positivo.");
-  if (price  <= 0 || !isFinite(price))  throw new Error("El precio debe ser un número positivo.");
+  if (shares <= 0 || !isFinite(shares)) {
+    throw new Error(
+      type === "SPLIT"
+        ? "El factor del split debe ser un número positivo (ej: 10 para un split 10:1)."
+        : "Las acciones deben ser un número positivo."
+    );
+  }
+  // En un SPLIT el precio no tiene significado: se almacena 1.
+  if (type !== "SPLIT" && (price <= 0 || !isFinite(price)))
+    throw new Error(
+      type === "DIVIDEND"
+        ? "El dividendo por acción debe ser un número positivo."
+        : "El precio debe ser un número positivo."
+    );
+  if (fee != null && (fee < 0 || !isFinite(fee)))
+    throw new Error("La comisión/retención no puede ser negativa.");
 
   const stock = await findStockByIdAndUser(stockId, userId);
   if (!stock) throw new Error("Acción no encontrada o no pertenece al usuario.");
@@ -192,13 +239,22 @@ export async function addTransaction(
     }
   }
 
-  return createTransaction({ stockId, type, shares, price, date: date ?? null, notes: notes ?? null });
+  return createTransaction({
+    stockId,
+    type,
+    shares,
+    price: type === "SPLIT" ? 1 : price,
+    fee:   type === "SPLIT" ? 0 : (fee ?? 0),
+    date:  date ?? null,
+    notes: notes ?? null,
+  });
 }
 
 export interface TransactionPatch {
   type?:   TransactionType;
   shares?: number;
   price?:  number;
+  fee?:    number;
   date?:   Date | null;
   notes?:  string | null;
 }
@@ -215,6 +271,8 @@ export async function editUserTransaction(
     throw new Error("Las acciones deben ser un número positivo.");
   if (patch.price  !== undefined && (patch.price  <= 0 || !isFinite(patch.price)))
     throw new Error("El precio debe ser un número positivo.");
+  if (patch.fee    !== undefined && (patch.fee < 0 || !isFinite(patch.fee)))
+    throw new Error("La comisión/retención no puede ser negativa.");
 
   // If changing type to SELL or updating shares on a SELL, validate available shares
   const effectiveType   = patch.type   ?? tx.type;
@@ -312,14 +370,22 @@ export async function getTransactionHistory(userId: string): Promise<SellHistory
     let openShares = 0;
 
     for (const tx of sorted) {
-      if (tx.type === "BUY") {
-        const totalCost = avgCost * openShares + tx.price * tx.shares;
+      if (tx.type === "SPLIT") {
+        if (tx.shares > 0 && openShares > 1e-9) {
+          openShares = r2(openShares * tx.shares);
+          avgCost    = avgCost / tx.shares;
+        }
+      } else if (tx.type === "DIVIDEND") {
+        // Los dividendos no son ventas: no generan entrada en el historial
+        continue;
+      } else if (tx.type === "BUY") {
+        const totalCost = avgCost * openShares + tx.price * tx.shares + (tx.fee ?? 0);
         openShares      = r2(openShares + tx.shares);
         avgCost         = openShares > 0 ? totalCost / openShares : 0;
       } else {
         const sellable       = Math.min(tx.shares, openShares);
         const investedAmount = r2(sellable * avgCost);
-        const revenueAmount  = r2(sellable * tx.price);
+        const revenueAmount  = r2(sellable * tx.price - (tx.fee ?? 0));
         const profitAmount   = r2(revenueAmount - investedAmount);
         const profitPct      = investedAmount > 0 ? r2((profitAmount / investedAmount) * 100) : 0;
 

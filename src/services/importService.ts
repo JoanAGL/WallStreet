@@ -112,6 +112,7 @@ interface DegiroRow {
   isin:     string;
   numero:   number;
   precio:   number;   // always in USD (converted at parse time)
+  fee:      number;   // transaction costs in USD (converted at parse time)
   orderId:  string;   // DEGIRO order ID for partial-fill grouping
 }
 
@@ -156,10 +157,12 @@ function mergePartialFills(rows: DegiroRow[]): DegiroRow[] {
     const tipo     = first.numero > 0 ? "BUY" : "SELL";
     const totalAbs = group.reduce((s, r) => s + Math.abs(r.numero), 0);
     const wacPrice = group.reduce((s, r) => s + Math.abs(r.numero) * r.precio, 0) / totalAbs;
+    const totalFee = group.reduce((s, r) => s + r.fee, 0);
     merged.push({
       ...first,
       numero: tipo === "BUY" ? totalAbs : -totalAbs,
       precio: Math.round(wacPrice * 10000) / 10000,
+      fee:    Math.round(totalFee * 100) / 100,
     });
   }
 
@@ -209,6 +212,10 @@ export async function importDegiroCSV(
   const fxKey = ["tipo de cambio", "tipo cambio", "exchange rate"]
     .find((k) => k in col) ?? null;
 
+  // Costes de transacción (comisión del broker por operación)
+  const feeKey = ["costes de transaccion", "costes de transaccion y/o", "transaction costs", "transaction and/or third"]
+    .find((k) => k in col) ?? null;
+
   // ── Parse data rows ──────────────────────────────────────────────────────
   const rows: DegiroRow[] = [];
   for (const line of allLines.slice(headerIdx + 1)) {
@@ -234,10 +241,25 @@ export async function importDegiroCSV(
       ? Math.round(precio * fxRate * 10000) / 10000
       : precio;
 
+    // Costes de transacción: DEGIRO los expresa en la divisa de la cuenta y
+    // negativos (cargo). La divisa va en la columna sin nombre siguiente; si
+    // no es USD se convierte con el mismo tipo de cambio de la fila.
+    let fee = 0;
+    if (feeKey) {
+      const rawFee = parseDegNum(cells[col[feeKey]] ?? "");
+      if (isFinite(rawFee) && rawFee !== 0) {
+        const feeCurrency = (cells[col[feeKey] + 1] ?? "").trim().toUpperCase() || "USD";
+        const absFee = Math.abs(rawFee);
+        fee = (feeCurrency !== "USD" && isFinite(fxRate) && fxRate > 0)
+          ? Math.round(absFee * fxRate * 100) / 100
+          : Math.round(absFee * 100) / 100;
+      }
+    }
+
     // Order ID (Bug A: used to collapse partial fills of the same order)
     const orderId = orderIdKey ? (cells[col[orderIdKey]] ?? "").trim() : "";
 
-    rows.push({ fecha, hora, producto, isin, numero, precio: precioFinal, orderId });
+    rows.push({ fecha, hora, producto, isin, numero, precio: precioFinal, fee, orderId });
   }
   if (rows.length === 0) throw new Error("No se encontraron transacciones válidas en el archivo.");
 
@@ -296,7 +318,7 @@ export async function importDegiroCSV(
 
   // ── Phase 4: build insert list ────────────────────────────────────────────
   type TxInsert = {
-    stockId: string; type: "BUY" | "SELL"; shares: number; price: number; date: Date;
+    stockId: string; type: "BUY" | "SELL"; shares: number; price: number; fee: number; date: Date;
   };
   const toInsert: TxInsert[] = [];
 
@@ -309,9 +331,11 @@ export async function importDegiroCSV(
     const date   = parseDegDate(row.fecha, row.hora);
 
     // row.precio is already in USD (converted at parse time, before mergePartialFills)
+    // La fee no entra en la clave de dedupe: reimportar un CSV antiguo sin
+    // columna de costes no debe duplicar transacciones ya existentes.
     const key = `${stockId}|${type}|${shares}|${row.precio}|${date.getTime()}`;
     if (!dedupSet.has(key)) {
-      toInsert.push({ stockId, type, shares, price: row.precio, date });
+      toInsert.push({ stockId, type, shares, price: row.precio, fee: row.fee, date });
       dedupSet.add(key);
     }
   }
@@ -330,8 +354,16 @@ export async function importDegiroCSV(
     });
     let open = 0, avgCost = 0;
     for (const t of allTxs) {
-      if (t.type === "BUY") {
-        const total = avgCost * open + t.price * t.shares;
+      if (t.type === "SPLIT") {
+        // shares = factor del split: ajusta acciones y coste medio
+        if (t.shares > 0 && open > 0) {
+          open    = Math.round(open * t.shares * 1e6) / 1e6;
+          avgCost = avgCost / t.shares;
+        }
+      } else if (t.type === "DIVIDEND") {
+        // renta: no altera la posición
+      } else if (t.type === "BUY") {
+        const total = avgCost * open + t.price * t.shares + (t.fee ?? 0);
         open    = Math.round((open + t.shares) * 1e6) / 1e6;
         avgCost = open > 0 ? total / open : 0;
       } else {

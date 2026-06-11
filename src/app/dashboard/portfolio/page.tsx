@@ -38,6 +38,7 @@ export default async function PortfolioPage() {
   const unpriced = summary.positions.filter(
     (p) => p.openShares > 0 && p.currentValue == null
   );
+  const totalDividends = summary.positions.reduce((s, p) => s + p.totalDividends, 0);
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
@@ -76,6 +77,13 @@ export default async function PortfolioPage() {
               value={fmtUSD((summary.totalUnrealizedPnL ?? 0) + summary.totalRealizedPnL)}
               valueClass={pnlCls((summary.totalUnrealizedPnL ?? 0) + summary.totalRealizedPnL)}
             />
+            {totalDividends > 0 && (
+              <StatCard
+                label="Dividendos netos"
+                value={fmtUSD(totalDividends)}
+                valueClass="text-green-600 font-bold"
+              />
+            )}
           </div>
 
           {unpriced.length > 0 && (
@@ -139,6 +147,13 @@ export default async function PortfolioPage() {
                     {pos.avgSellPrice != null && (
                       <Cell label="Precio medio venta" value={fmtUSD(pos.avgSellPrice)} />
                     )}
+                    {pos.totalDividends > 0 && (
+                      <Cell label="Dividendos netos" value={fmtUSD(pos.totalDividends)}
+                        valueClass="text-green-600 font-bold" />
+                    )}
+                    {pos.totalFees > 0 && (
+                      <Cell label="Comisiones" value={fmtUSD(pos.totalFees)} />
+                    )}
                   </div>
 
                   {/* Transaction list */}
@@ -152,17 +167,23 @@ export default async function PortfolioPage() {
                           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                           .map((tx) => {
                             const isBuy   = tx.type === "BUY";
+                            const isSplit = tx.type === "SPLIT";
+                            const isDiv   = tx.type === "DIVIDEND";
                             const dateStr = tx.date
                               ? new Date(tx.date).toLocaleDateString("es-ES")
                               : new Date(tx.createdAt).toLocaleDateString("es-ES");
                             return (
                               <div key={tx.id}
                                 className="flex items-center gap-3 rounded-lg bg-gray-50 border border-gray-100 px-3 py-1.5">
-                                <span className={`font-bold w-8 ${isBuy ? "text-green-600" : "text-red-600"}`}>
-                                  {tx.type}
+                                <span className={`font-bold w-10 ${isSplit ? "text-blue-600" : isDiv ? "text-amber-600" : isBuy ? "text-green-600" : "text-red-600"}`}>
+                                  {isDiv ? "DIV" : tx.type}
                                 </span>
                                 <span className="text-gray-700 flex-1">
-                                  {tx.shares} acc. × {fmtUSD(tx.price)} = {fmtUSD(tx.shares * tx.price)}
+                                  {isSplit
+                                    ? `Split ×${tx.shares}`
+                                    : isDiv
+                                    ? `Dividendo: ${fmtUSD(tx.shares * tx.price - (tx.fee ?? 0))} neto`
+                                    : <>{tx.shares} acc. × {fmtUSD(tx.price)} = {fmtUSD(tx.shares * tx.price)}{tx.fee ? ` − ${fmtUSD(tx.fee)} com.` : ""}</>}
                                 </span>
                                 <span className="text-gray-400">{dateStr}</span>
                                 {tx.notes && (
