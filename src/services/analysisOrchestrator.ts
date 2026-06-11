@@ -237,9 +237,16 @@ async function runFullAnalysis(
 
   const staleStocks: StockInput[] = [];
   const finalResults: OrchestrationResult[] = [];
+  // Último precio válido conocido por stock: si hoy fallan todas las fuentes
+  // de cotización, es mejor conservar el precio de ayer (marcado degraded)
+  // que machacarlo con 0 y mostrar la posición como pérdida total.
+  const prevQuoteMap = new Map<string, { price: number; priceUSD: number | null; currency: string }>();
 
   stocks.forEach((stock, i) => {
     const cached = freshnessResults[i].status === "fulfilled" ? freshnessResults[i].value : null;
+    if (cached && cached.price > 0) {
+      prevQuoteMap.set(stock.id, { price: cached.price, priceUSD: cached.priceUSD, currency: cached.currency });
+    }
     if (isFresh(cached, forceUpdate)) {
       finalResults.push({ ticker: stock.ticker, stockId: stock.id, success: true, skipped: true, analysis: cached! });
     } else {
@@ -274,7 +281,21 @@ async function runFullAnalysis(
       if (historicalResult.status   === "rejected") console.warn(`[ORCHESTRATOR] Historical fallback for ${stock.ticker}:`,   historicalResult.reason);
       if (fundamentalsResult.status === "rejected") console.warn(`[ORCHESTRATOR] Fundamentals fallback for ${stock.ticker}:`, fundamentalsResult.reason);
 
-      const quote           = quoteResult.status        === "fulfilled" ? quoteResult.value        : DEFAULT_FALLBACKS.quote(stock.ticker);
+      const prev = prevQuoteMap.get(stock.id);
+      const quote: CurrentQuote = quoteResult.status === "fulfilled"
+        ? quoteResult.value
+        : prev
+          ? {
+              ticker:        stock.ticker,
+              price:         prev.price,
+              priceUSD:      prev.priceUSD ?? prev.price,
+              currency:      prev.currency ?? "USD",
+              previousClose: prev.price,
+              change:        0,
+              changePercent: 0,
+              fetchedAt:     new Date().toISOString(),
+            }
+          : DEFAULT_FALLBACKS.quote(stock.ticker);
       const historical      = historicalResult.status   === "fulfilled" ? historicalResult.value   : DEFAULT_FALLBACKS.historical(stock.ticker);
       const allFundamentals = fundamentalsResult.status === "fulfilled" ? fundamentalsResult.value : DEFAULT_FALLBACKS.fundamentals;
 
