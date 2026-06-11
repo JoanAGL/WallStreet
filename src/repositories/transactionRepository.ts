@@ -2,13 +2,15 @@ import { prisma } from "@/lib/prisma";
 
 // SPLIT: ajuste por split/contrasplit — `shares` guarda el factor (10 para
 // 10:1, 0.1 para 1:10) y `price` se almacena como 1 (sin significado).
-export type TransactionType = "BUY" | "SELL" | "SPLIT";
+// DIVIDEND: `shares` × `price` = importe bruto del dividendo; `fee` = retención.
+export type TransactionType = "BUY" | "SELL" | "SPLIT" | "DIVIDEND";
 
 export interface TransactionData {
   stockId: string;
   type:    TransactionType;
   shares:  number;
   price:   number;
+  fee?:    number;          // comisión (BUY/SELL) o retención (DIVIDEND), USD
   date?:   Date | null;
   notes?:  string | null;
 }
@@ -19,6 +21,7 @@ export interface TransactionRecord {
   type:      TransactionType;
   shares:    number;
   price:     number;
+  fee:       number;
   date:      Date | null;
   notes:     string | null;
   createdAt: Date;

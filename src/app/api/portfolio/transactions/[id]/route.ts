@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * PATCH /api/portfolio/transactions/[id]
- * Body: { type?, shares?, price?, date?, notes? }
+ * Body: { type?, shares?, price?, fee?, date?, notes? }
  * Updates a transaction owned by the authenticated user.
  */
 export async function PATCH(
@@ -22,23 +22,26 @@ export async function PATCH(
     return NextResponse.json({ error: "Cuerpo de la petición inválido" }, { status: 400 });
   }
 
-  const { type, shares, price, date, notes } = (body as Record<string, unknown>) ?? {};
+  const { type, shares, price, fee, date, notes } = (body as Record<string, unknown>) ?? {};
 
-  if (type !== undefined && type !== "BUY" && type !== "SELL")
-    return NextResponse.json({ error: "type debe ser BUY o SELL" }, { status: 400 });
+  if (type !== undefined && type !== "BUY" && type !== "SELL" && type !== "SPLIT" && type !== "DIVIDEND")
+    return NextResponse.json({ error: "type debe ser BUY, SELL, SPLIT o DIVIDEND" }, { status: 400 });
   if (shares !== undefined && (typeof shares !== "number" || shares <= 0 || !isFinite(shares)))
     return NextResponse.json({ error: "shares debe ser un número positivo" }, { status: 400 });
   if (price !== undefined && (typeof price !== "number" || price <= 0 || !isFinite(price)))
     return NextResponse.json({ error: "price debe ser un número positivo" }, { status: 400 });
+  if (fee !== undefined && (typeof fee !== "number" || fee < 0 || !isFinite(fee)))
+    return NextResponse.json({ error: "fee debe ser un número ≥ 0" }, { status: 400 });
 
   const parsedDate  = typeof date  === "string" && date  ? new Date(date)  : date  === null ? null : undefined;
   const parsedNotes = typeof notes === "string"          ? notes.trim() || null : notes === null ? null : undefined;
 
   try {
     const tx = await editUserTransaction(session.user.id, params.id, {
-      type:  type  as "BUY" | "SELL" | undefined,
+      type:  type  as "BUY" | "SELL" | "SPLIT" | "DIVIDEND" | undefined,
       shares: shares as number | undefined,
       price:  price  as number | undefined,
+      fee:    fee    as number | undefined,
       date:   parsedDate,
       notes:  parsedNotes,
     });

@@ -223,15 +223,16 @@ export async function getDecisionAnalysis(userId: string): Promise<DecisionAnaly
         }
         continue;
       }
+      if (tx.type === "DIVIDEND") continue; // renta, no operación de compra/venta
       if (tx.type === "BUY") {
         if (!firstBuyDate) firstBuyDate = txDate;
-        const total = avgCost * open + tx.price * tx.shares;
+        const total = avgCost * open + tx.price * tx.shares + (tx.fee ?? 0);
         open    = Math.round((open + tx.shares) * 1e6) / 1e6;
         avgCost = open > 0 ? total / open : 0;
       } else if (open > 0 && firstBuyDate) {
         const sellable   = Math.min(tx.shares, open);
         const invested   = Math.round(sellable * avgCost * 100) / 100;
-        const profitAmt  = Math.round(sellable * (tx.price - avgCost) * 100) / 100;
+        const profitAmt  = Math.round((sellable * (tx.price - avgCost) - (tx.fee ?? 0)) * 100) / 100;
         const profitPct  = invested > 0 ? Math.round((profitAmt / invested) * 10000) / 100 : 0;
         const holding    = Math.max(0, Math.floor((txDate.getTime() - firstBuyDate.getTime()) / 86_400_000));
         trades.push({

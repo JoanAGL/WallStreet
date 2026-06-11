@@ -3,6 +3,8 @@ import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import type { PositionMetrics, TransactionRecord } from "@/services/transactionService";
 
+type TxType = "BUY" | "SELL" | "SPLIT" | "DIVIDEND";
+
 interface Props {
   stockId:      string;
   ticker:       string;
@@ -48,10 +50,11 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
   // Form state — shared for create and edit
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen,  setFormOpen]  = useState(false);
-  const [fType,     setFType]     = useState<"BUY" | "SELL" | "SPLIT">("BUY");
+  const [fType,     setFType]     = useState<TxType>("BUY");
   const [fShares,   setFShares]   = useState("");
   const [fPrice,    setFPrice]    = useState(currentPrice?.toFixed(2) ?? "");
   const [fDate,     setFDate]     = useState("");
+  const [fFee,      setFFee]      = useState("");
   const [fNotes,    setFNotes]    = useState("");
   const [fErr,      setFErr]      = useState<string | null>(null);
   const [fSaving,   setFSaving]   = useState(false);
@@ -78,6 +81,7 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
     setFShares("");
     setFPrice(currentPrice?.toFixed(2) ?? "");
     setFDate("");
+    setFFee("");
     setFNotes("");
     setFErr(null);
     setFormOpen(true);
@@ -89,6 +93,7 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
     setFShares(String(tx.shares));
     setFPrice(String(tx.price));
     setFDate(toDateInput(tx.date));
+    setFFee(tx.fee ? String(tx.fee) : "");
     setFNotes(tx.notes ?? "");
     setFErr(null);
     setFormOpen(true);
@@ -104,17 +109,23 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
     const isSplit = fType === "SPLIT";
     const shares  = parseFloat(fShares);
     const price   = isSplit ? 1 : parseFloat(fPrice);
+    const fee     = fFee.trim() ? parseFloat(fFee) : 0;
     if (!isFinite(shares) || shares <= 0) {
       setFErr(isSplit ? "El factor debe ser un número positivo (ej: 10 para 10:1)." : "Acciones debe ser un número positivo.");
       return;
     }
-    if (!isFinite(price) || price <= 0) { setFErr("Precio debe ser un número positivo."); return; }
+    if (!isFinite(price) || price <= 0) {
+      setFErr(fType === "DIVIDEND" ? "El dividendo por acción debe ser un número positivo." : "Precio debe ser un número positivo.");
+      return;
+    }
+    if (!isFinite(fee) || fee < 0) { setFErr("La comisión/retención no puede ser negativa."); return; }
 
     setFSaving(true); setFErr(null);
     try {
       const body = JSON.stringify({
         ...(editingId ? {} : { stockId }),
         type: fType, shares, price,
+        fee:   isSplit ? 0 : fee,
         date:  fDate  || null,
         notes: fNotes || null,
       });
@@ -198,6 +209,12 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
                 {metrics.avgSellPrice != null && (
                   <MetricBox label="Precio medio venta" value={fmtUSD(metrics.avgSellPrice)} />
                 )}
+                {metrics.totalDividends > 0 && (
+                  <MetricBox label="Dividendos netos" value={fmtUSD(metrics.totalDividends)} valueClass="text-green-600 font-semibold" />
+                )}
+                {metrics.totalFees > 0 && (
+                  <MetricBox label="Comisiones" value={fmtUSD(metrics.totalFees)} valueClass="text-gray-500" />
+                )}
                 {metrics.portfolioWeightPct != null && (
                   <MetricBox label="Peso en cartera" value={`${metrics.portfolioWeightPct.toFixed(1)}%`} />
                 )}
@@ -235,12 +252,13 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
           ) : (
             <TransactionForm
               isEditing={editingId !== null}
-              type={fType} shares={fShares} price={fPrice} date={fDate} notes={fNotes}
+              type={fType} shares={fShares} price={fPrice} date={fDate} fee={fFee} notes={fNotes}
               saving={fSaving} error={fErr}
               onTypeChange={setFType}
               onSharesChange={setFShares}
               onPriceChange={setFPrice}
               onDateChange={setFDate}
+              onFeeChange={setFFee}
               onNotesChange={setFNotes}
               onSubmit={handleSubmit}
               onCancel={closeForm}
@@ -260,19 +278,24 @@ function TxRow({
   onEdit:   (tx: TransactionRecord) => void;
   onDelete: (id: string) => void;
 }) {
-  const isBuy   = tx.type === "BUY";
+  const isBuy = tx.type === "BUY";
   const isSplit = tx.type === "SPLIT";
+  const isDiv = tx.type === "DIVIDEND";
   const dateStr = tx.date
     ? new Date(tx.date).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
     : new Date(tx.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
   return (
     <div className="flex items-center gap-2 rounded-lg bg-white border border-slate-100 px-3 py-2 text-xs">
-      <span className={`font-bold w-10 shrink-0 ${isSplit ? "text-blue-600" : isBuy ? "text-green-600" : "text-red-600"}`}>
-        {tx.type}
+      <span className={`font-bold w-10 shrink-0 ${isSplit ? "text-blue-600" : isDiv ? "text-amber-600" : isBuy ? "text-green-600" : "text-red-600"}`}>
+        {isDiv ? "DIV" : tx.type}
       </span>
       <span className="text-gray-700 flex-1 min-w-0">
-        {isSplit ? `Split ×${tx.shares}` : <>{tx.shares} × {fmtUSD(tx.price)}</>}
+        {isSplit
+          ? `Split ×${tx.shares}`
+          : isDiv
+          ? <>{fmtUSD(tx.shares * tx.price - (tx.fee ?? 0))} neto</>
+          : <>{tx.shares} × {fmtUSD(tx.price)}{tx.fee ? ` − ${fmtUSD(tx.fee)} com.` : ""}</>}
       </span>
       <span className="text-gray-400 shrink-0">{dateStr}</span>
       {tx.notes && (
@@ -307,25 +330,39 @@ const inputCls =
 
 interface FormProps {
   isEditing:      boolean;
-  type:           "BUY" | "SELL" | "SPLIT";
+  type:           TxType;
   shares:         string;
   price:          string;
   date:           string;
+  fee:            string;
   notes:          string;
   saving:         boolean;
   error:          string | null;
-  onTypeChange:   (v: "BUY" | "SELL" | "SPLIT") => void;
+  onTypeChange:   (v: TxType) => void;
   onSharesChange: (v: string) => void;
   onPriceChange:  (v: string) => void;
   onDateChange:   (v: string) => void;
+  onFeeChange:    (v: string) => void;
   onNotesChange:  (v: string) => void;
   onSubmit:       () => void;
   onCancel:       () => void;
 }
 
+const TYPE_LABELS: Record<TxType, string> = {
+  BUY: "Compra", SELL: "Venta", SPLIT: "Split", DIVIDEND: "Dividendo",
+};
+const TYPE_ACTIVE_CLS: Record<TxType, string> = {
+  BUY: "bg-green-500 text-white", SELL: "bg-red-500 text-white",
+  SPLIT: "bg-blue-500 text-white", DIVIDEND: "bg-amber-500 text-white",
+};
+const TYPE_SUBMIT_CLS: Record<TxType, string> = {
+  BUY: "bg-green-600 hover:bg-green-700", SELL: "bg-red-600 hover:bg-red-700",
+  SPLIT: "bg-blue-600 hover:bg-blue-700", DIVIDEND: "bg-amber-600 hover:bg-amber-700",
+};
+
 function TransactionForm({
-  isEditing, type, shares, price, date, notes, saving, error,
-  onTypeChange, onSharesChange, onPriceChange, onDateChange, onNotesChange,
+  isEditing, type, shares, price, date, fee, notes, saving, error,
+  onTypeChange, onSharesChange, onPriceChange, onDateChange, onFeeChange, onNotesChange,
   onSubmit, onCancel,
 }: FormProps) {
   return (
@@ -334,21 +371,17 @@ function TransactionForm({
         {isEditing ? "Editar transacción" : "Nueva transacción"}
       </p>
 
-      {/* BUY / SELL / SPLIT toggle */}
+      {/* BUY / SELL / SPLIT / DIVIDEND toggle */}
       <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-        {(["BUY", "SELL", "SPLIT"] as const).map((t) => (
+        {(["BUY", "SELL", "SPLIT", "DIVIDEND"] as const).map((t) => (
           <button
             key={t}
             onClick={() => onTypeChange(t)}
             className={`flex-1 py-2 transition-colors ${
-              type === t
-                ? t === "BUY" ? "bg-green-500 text-white"
-                : t === "SELL" ? "bg-red-500 text-white"
-                : "bg-blue-500 text-white"
-                : "bg-white text-gray-500 hover:bg-gray-50"
+              type === t ? TYPE_ACTIVE_CLS[t] : "bg-white text-gray-500 hover:bg-gray-50"
             }`}
           >
-            {t === "BUY" ? "Compra" : t === "SELL" ? "Venta" : "Split"}
+            {TYPE_LABELS[t]}
           </button>
         ))}
       </div>
@@ -357,6 +390,12 @@ function TransactionForm({
         <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-1.5">
           Ajusta la posición por un split: factor 10 = split 10:1 (×10 acciones, ÷10 precio medio);
           factor 0.1 = contrasplit 1:10. No afecta al capital invertido ni al P&L realizado.
+        </p>
+      )}
+      {type === "DIVIDEND" && (
+        <p className="text-xs text-gray-500 bg-amber-50 border border-amber-100 rounded-lg px-3 py-1.5">
+          Dividendo cobrado: acciones × importe por acción = bruto; la retención se descuenta
+          como neto. Se acumula en «Dividendos netos» sin alterar la posición.
         </p>
       )}
 
@@ -369,11 +408,14 @@ function TransactionForm({
           />
         </FormField>
         {type !== "SPLIT" && (
-          <FormField label={`Precio ${type === "BUY" ? "compra" : "venta"} * (USD)`}>
+          <FormField label={
+            type === "DIVIDEND" ? "Dividendo por acción * (USD)"
+            : `Precio ${type === "BUY" ? "compra" : "venta"} * (USD)`
+          }>
             <input
               type="number" min="0.01" step="any" value={price}
               onChange={(e) => onPriceChange(e.target.value)}
-              className={inputCls} placeholder="ej: 150.00"
+              className={inputCls} placeholder={type === "DIVIDEND" ? "ej: 0.25" : "ej: 150.00"}
             />
           </FormField>
         )}
@@ -384,11 +426,24 @@ function TransactionForm({
             className={inputCls}
           />
         </FormField>
+        {type !== "SPLIT" && (
+          <FormField label={type === "DIVIDEND" ? "Retención (opcional, USD)" : "Comisión (opcional, USD)"}>
+            <input
+              type="number" min="0" step="any" value={fee}
+              onChange={(e) => onFeeChange(e.target.value)}
+              className={inputCls} placeholder={type === "DIVIDEND" ? "ej: 1.20" : "ej: 0.50"}
+            />
+          </FormField>
+        )}
         <FormField label="Notas (opcional)">
           <input
             type="text" value={notes}
             onChange={(e) => onNotesChange(e.target.value)}
-            className={inputCls} placeholder={type === "SPLIT" ? "ej: split 10:1 NFLX" : "¿Por qué compraste?"}
+            className={inputCls} placeholder={
+              type === "SPLIT" ? "ej: split 10:1 NFLX"
+              : type === "DIVIDEND" ? "ej: dividendo trimestral"
+              : "¿Por qué compraste?"
+            }
           />
         </FormField>
       </div>
@@ -408,17 +463,11 @@ function TransactionForm({
         </button>
         <button
           onClick={onSubmit} disabled={saving}
-          className={`flex-1 rounded-xl text-white text-xs font-medium py-2 disabled:opacity-40 transition-colors ${
-            type === "BUY" ? "bg-green-600 hover:bg-green-700"
-            : type === "SELL" ? "bg-red-600 hover:bg-red-700"
-            : "bg-blue-600 hover:bg-blue-700"
-          }`}
+          className={`flex-1 rounded-xl text-white text-xs font-medium py-2 disabled:opacity-40 transition-colors ${TYPE_SUBMIT_CLS[type]}`}
         >
           {saving
             ? "Guardando…"
-            : `${isEditing ? "Actualizar" : "Registrar"} ${
-                type === "BUY" ? "compra" : type === "SELL" ? "venta" : "split"
-              }`}
+            : `${isEditing ? "Actualizar" : "Registrar"} ${TYPE_LABELS[type].toLowerCase()}`}
         </button>
       </div>
     </div>
