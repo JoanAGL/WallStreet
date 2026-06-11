@@ -134,6 +134,7 @@ model StockAnalysisHistory {
 enum TransactionType {
   BUY
   SELL
+  SPLIT
 }
 
 model Transaction {

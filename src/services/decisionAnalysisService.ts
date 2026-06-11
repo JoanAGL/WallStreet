@@ -215,6 +215,14 @@ export async function getDecisionAnalysis(userId: string): Promise<DecisionAnaly
 
     for (const tx of sorted) {
       const txDate = tx.date ?? tx.createdAt;
+      if (tx.type === "SPLIT") {
+        // shares = factor del split; ajusta posición abierta sin tocar P&L
+        if (tx.shares > 0 && open > 0) {
+          open    = Math.round(open * tx.shares * 1e6) / 1e6;
+          avgCost = avgCost / tx.shares;
+        }
+        continue;
+      }
       if (tx.type === "BUY") {
         if (!firstBuyDate) firstBuyDate = txDate;
         const total = avgCost * open + tx.price * tx.shares;

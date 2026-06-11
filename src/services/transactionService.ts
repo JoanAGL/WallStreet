@@ -86,6 +86,18 @@ export function calculatePositionMetrics(
 
   for (const tx of sorted) {
     const txDate = tx.date ?? tx.createdAt;
+
+    if (tx.type === "SPLIT") {
+      // shares = factor (10 → 10:1, 0.1 → contrasplit 1:10). Multiplica las
+      // acciones abiertas y divide el coste medio: el capital no cambia.
+      // No toca firstDate/lastDate: un split no es una operación de cartera.
+      if (tx.shares > 0 && openShares > 1e-9) {
+        openShares = r2(openShares * tx.shares);
+        avgCost    = avgCost / tx.shares;
+      }
+      continue;
+    }
+
     if (!firstDate || txDate < firstDate) firstDate = txDate;
     if (!lastDate  || txDate > lastDate)  lastDate  = txDate;
 
@@ -176,8 +188,16 @@ export async function addTransaction(
   date?:   Date | null,
   notes?:  string | null
 ): Promise<TransactionRecord> {
-  if (shares <= 0 || !isFinite(shares)) throw new Error("Las acciones deben ser un número positivo.");
-  if (price  <= 0 || !isFinite(price))  throw new Error("El precio debe ser un número positivo.");
+  if (shares <= 0 || !isFinite(shares)) {
+    throw new Error(
+      type === "SPLIT"
+        ? "El factor del split debe ser un número positivo (ej: 10 para un split 10:1)."
+        : "Las acciones deben ser un número positivo."
+    );
+  }
+  // En un SPLIT el precio no tiene significado: se almacena 1.
+  if (type !== "SPLIT" && (price <= 0 || !isFinite(price)))
+    throw new Error("El precio debe ser un número positivo.");
 
   const stock = await findStockByIdAndUser(stockId, userId);
   if (!stock) throw new Error("Acción no encontrada o no pertenece al usuario.");
@@ -192,7 +212,14 @@ export async function addTransaction(
     }
   }
 
-  return createTransaction({ stockId, type, shares, price, date: date ?? null, notes: notes ?? null });
+  return createTransaction({
+    stockId,
+    type,
+    shares,
+    price: type === "SPLIT" ? 1 : price,
+    date:  date ?? null,
+    notes: notes ?? null,
+  });
 }
 
 export interface TransactionPatch {
@@ -312,7 +339,12 @@ export async function getTransactionHistory(userId: string): Promise<SellHistory
     let openShares = 0;
 
     for (const tx of sorted) {
-      if (tx.type === "BUY") {
+      if (tx.type === "SPLIT") {
+        if (tx.shares > 0 && openShares > 1e-9) {
+          openShares = r2(openShares * tx.shares);
+          avgCost    = avgCost / tx.shares;
+        }
+      } else if (tx.type === "BUY") {
         const totalCost = avgCost * openShares + tx.price * tx.shares;
         openShares      = r2(openShares + tx.shares);
         avgCost         = openShares > 0 ? totalCost / openShares : 0;

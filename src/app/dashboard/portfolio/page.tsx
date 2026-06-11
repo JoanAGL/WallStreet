@@ -152,17 +152,20 @@ export default async function PortfolioPage() {
                           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                           .map((tx) => {
                             const isBuy   = tx.type === "BUY";
+                            const isSplit = tx.type === "SPLIT";
                             const dateStr = tx.date
                               ? new Date(tx.date).toLocaleDateString("es-ES")
                               : new Date(tx.createdAt).toLocaleDateString("es-ES");
                             return (
                               <div key={tx.id}
                                 className="flex items-center gap-3 rounded-lg bg-gray-50 border border-gray-100 px-3 py-1.5">
-                                <span className={`font-bold w-8 ${isBuy ? "text-green-600" : "text-red-600"}`}>
+                                <span className={`font-bold w-10 ${isSplit ? "text-blue-600" : isBuy ? "text-green-600" : "text-red-600"}`}>
                                   {tx.type}
                                 </span>
                                 <span className="text-gray-700 flex-1">
-                                  {tx.shares} acc. × {fmtUSD(tx.price)} = {fmtUSD(tx.shares * tx.price)}
+                                  {isSplit
+                                    ? `Split ×${tx.shares}`
+                                    : <>{tx.shares} acc. × {fmtUSD(tx.price)} = {fmtUSD(tx.shares * tx.price)}</>}
                                 </span>
                                 <span className="text-gray-400">{dateStr}</span>
                                 {tx.notes && (

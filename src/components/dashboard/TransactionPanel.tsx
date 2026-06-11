@@ -48,7 +48,7 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
   // Form state — shared for create and edit
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formOpen,  setFormOpen]  = useState(false);
-  const [fType,     setFType]     = useState<"BUY" | "SELL">("BUY");
+  const [fType,     setFType]     = useState<"BUY" | "SELL" | "SPLIT">("BUY");
   const [fShares,   setFShares]   = useState("");
   const [fPrice,    setFPrice]    = useState(currentPrice?.toFixed(2) ?? "");
   const [fDate,     setFDate]     = useState("");
@@ -101,10 +101,14 @@ export default function TransactionPanel({ stockId, ticker, currentPrice }: Prop
   }
 
   async function handleSubmit() {
-    const shares = parseFloat(fShares);
-    const price  = parseFloat(fPrice);
-    if (!isFinite(shares) || shares <= 0) { setFErr("Acciones debe ser un número positivo."); return; }
-    if (!isFinite(price)  || price  <= 0) { setFErr("Precio debe ser un número positivo.");   return; }
+    const isSplit = fType === "SPLIT";
+    const shares  = parseFloat(fShares);
+    const price   = isSplit ? 1 : parseFloat(fPrice);
+    if (!isFinite(shares) || shares <= 0) {
+      setFErr(isSplit ? "El factor debe ser un número positivo (ej: 10 para 10:1)." : "Acciones debe ser un número positivo.");
+      return;
+    }
+    if (!isFinite(price) || price <= 0) { setFErr("Precio debe ser un número positivo."); return; }
 
     setFSaving(true); setFErr(null);
     try {
@@ -257,17 +261,18 @@ function TxRow({
   onDelete: (id: string) => void;
 }) {
   const isBuy   = tx.type === "BUY";
+  const isSplit = tx.type === "SPLIT";
   const dateStr = tx.date
     ? new Date(tx.date).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" })
     : new Date(tx.createdAt).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
 
   return (
     <div className="flex items-center gap-2 rounded-lg bg-white border border-slate-100 px-3 py-2 text-xs">
-      <span className={`font-bold w-8 shrink-0 ${isBuy ? "text-green-600" : "text-red-600"}`}>
-        {isBuy ? "BUY" : "SELL"}
+      <span className={`font-bold w-10 shrink-0 ${isSplit ? "text-blue-600" : isBuy ? "text-green-600" : "text-red-600"}`}>
+        {tx.type}
       </span>
       <span className="text-gray-700 flex-1 min-w-0">
-        {tx.shares} × {fmtUSD(tx.price)}
+        {isSplit ? `Split ×${tx.shares}` : <>{tx.shares} × {fmtUSD(tx.price)}</>}
       </span>
       <span className="text-gray-400 shrink-0">{dateStr}</span>
       {tx.notes && (
@@ -302,14 +307,14 @@ const inputCls =
 
 interface FormProps {
   isEditing:      boolean;
-  type:           "BUY" | "SELL";
+  type:           "BUY" | "SELL" | "SPLIT";
   shares:         string;
   price:          string;
   date:           string;
   notes:          string;
   saving:         boolean;
   error:          string | null;
-  onTypeChange:   (v: "BUY" | "SELL") => void;
+  onTypeChange:   (v: "BUY" | "SELL" | "SPLIT") => void;
   onSharesChange: (v: string) => void;
   onPriceChange:  (v: string) => void;
   onDateChange:   (v: string) => void;
@@ -329,39 +334,50 @@ function TransactionForm({
         {isEditing ? "Editar transacción" : "Nueva transacción"}
       </p>
 
-      {/* BUY / SELL toggle */}
+      {/* BUY / SELL / SPLIT toggle */}
       <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-        {(["BUY", "SELL"] as const).map((t) => (
+        {(["BUY", "SELL", "SPLIT"] as const).map((t) => (
           <button
             key={t}
             onClick={() => onTypeChange(t)}
             className={`flex-1 py-2 transition-colors ${
               type === t
-                ? t === "BUY" ? "bg-green-500 text-white" : "bg-red-500 text-white"
+                ? t === "BUY" ? "bg-green-500 text-white"
+                : t === "SELL" ? "bg-red-500 text-white"
+                : "bg-blue-500 text-white"
                 : "bg-white text-gray-500 hover:bg-gray-50"
             }`}
           >
-            {t === "BUY" ? "Compra" : "Venta"}
+            {t === "BUY" ? "Compra" : t === "SELL" ? "Venta" : "Split"}
           </button>
         ))}
       </div>
 
+      {type === "SPLIT" && (
+        <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-1.5">
+          Ajusta la posición por un split: factor 10 = split 10:1 (×10 acciones, ÷10 precio medio);
+          factor 0.1 = contrasplit 1:10. No afecta al capital invertido ni al P&L realizado.
+        </p>
+      )}
+
       <div className="grid grid-cols-2 gap-2">
-        <FormField label="Acciones *">
+        <FormField label={type === "SPLIT" ? "Factor del split *" : "Acciones *"}>
           <input
             type="number" min="0.001" step="any" value={shares}
             onChange={(e) => onSharesChange(e.target.value)}
-            className={inputCls} placeholder="ej: 10"
+            className={inputCls} placeholder={type === "SPLIT" ? "ej: 10 (10:1)" : "ej: 10"}
           />
         </FormField>
-        <FormField label={`Precio ${type === "BUY" ? "compra" : "venta"} * (USD)`}>
-          <input
-            type="number" min="0.01" step="any" value={price}
-            onChange={(e) => onPriceChange(e.target.value)}
-            className={inputCls} placeholder="ej: 150.00"
-          />
-        </FormField>
-        <FormField label="Fecha (opcional)">
+        {type !== "SPLIT" && (
+          <FormField label={`Precio ${type === "BUY" ? "compra" : "venta"} * (USD)`}>
+            <input
+              type="number" min="0.01" step="any" value={price}
+              onChange={(e) => onPriceChange(e.target.value)}
+              className={inputCls} placeholder="ej: 150.00"
+            />
+          </FormField>
+        )}
+        <FormField label={type === "SPLIT" ? "Fecha efectiva (opcional)" : "Fecha (opcional)"}>
           <input
             type="date" value={date}
             onChange={(e) => onDateChange(e.target.value)}
@@ -372,7 +388,7 @@ function TransactionForm({
           <input
             type="text" value={notes}
             onChange={(e) => onNotesChange(e.target.value)}
-            className={inputCls} placeholder="¿Por qué compraste?"
+            className={inputCls} placeholder={type === "SPLIT" ? "ej: split 10:1 NFLX" : "¿Por qué compraste?"}
           />
         </FormField>
       </div>
@@ -393,14 +409,16 @@ function TransactionForm({
         <button
           onClick={onSubmit} disabled={saving}
           className={`flex-1 rounded-xl text-white text-xs font-medium py-2 disabled:opacity-40 transition-colors ${
-            type === "BUY" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"
+            type === "BUY" ? "bg-green-600 hover:bg-green-700"
+            : type === "SELL" ? "bg-red-600 hover:bg-red-700"
+            : "bg-blue-600 hover:bg-blue-700"
           }`}
         >
           {saving
             ? "Guardando…"
-            : isEditing
-              ? `Actualizar ${type === "BUY" ? "compra" : "venta"}`
-              : `Registrar ${type === "BUY" ? "compra" : "venta"}`}
+            : `${isEditing ? "Actualizar" : "Registrar"} ${
+                type === "BUY" ? "compra" : type === "SELL" ? "venta" : "split"
+              }`}
         </button>
       </div>
     </div>

@@ -330,7 +330,13 @@ export async function importDegiroCSV(
     });
     let open = 0, avgCost = 0;
     for (const t of allTxs) {
-      if (t.type === "BUY") {
+      if (t.type === "SPLIT") {
+        // shares = factor del split: ajusta acciones y coste medio
+        if (t.shares > 0 && open > 0) {
+          open    = Math.round(open * t.shares * 1e6) / 1e6;
+          avgCost = avgCost / t.shares;
+        }
+      } else if (t.type === "BUY") {
         const total = avgCost * open + t.price * t.shares;
         open    = Math.round((open + t.shares) * 1e6) / 1e6;
         avgCost = open > 0 ? total / open : 0;

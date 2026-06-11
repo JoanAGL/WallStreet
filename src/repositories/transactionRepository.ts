@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 
-export type TransactionType = "BUY" | "SELL";
+// SPLIT: ajuste por split/contrasplit — `shares` guarda el factor (10 para
+// 10:1, 0.1 para 1:10) y `price` se almacena como 1 (sin significado).
+export type TransactionType = "BUY" | "SELL" | "SPLIT";
 
 export interface TransactionData {
   stockId: string;
