@@ -64,21 +64,61 @@ export async function fetchTickerCurrency(ticker: string): Promise<string> {
 }
 
 export async function fetchEURUSD(): Promise<number> {
+  return (await fetchFxToUSD("EUR")) ?? 1.10;
+}
+
+// ── FX divisa → USD (genérico) ────────────────────────────────────────────────
+
+// Caché en memoria por proceso: el FX intradía no necesita más resolución
+const FX_CACHE_TTL_MS = 60 * 60 * 1000; // 1h
+const fxCache = new Map<string, { rate: number; at: number }>();
+
+/**
+ * Tipo de cambio divisa → USD vía Yahoo ({CUR}USD=X).
+ * - USD → 1.
+ * - GBp/GBX (peniques de Londres) → GBPUSD / 100.
+ * - Devuelve null si Yahoo no responde: el caller decide el fallback —
+ *   aplicar un tipo equivocado (p.ej. EURUSD a un precio en DKK) produce
+ *   valoraciones disparatadas, mejor fallar explícitamente.
+ */
+export async function fetchFxToUSD(currency: string): Promise<number | null> {
+  const cur = (currency || "USD").trim();
+  if (cur.toUpperCase() === "USD") return 1;
+
+  // Londres cotiza en peniques (Yahoo: "GBp" o "GBX")
+  const isPence = cur === "GBp" || cur.toUpperCase() === "GBX";
+  const base    = isPence ? "GBP" : cur.toUpperCase();
+
+  const cached = fxCache.get(base);
+  if (cached && Date.now() - cached.at < FX_CACHE_TTL_MS) {
+    return isPence ? cached.rate / 100 : cached.rate;
+  }
+
   try {
-    const url = `${BASE_URL}/EURUSD=X?interval=1d&range=5d`;
+    const url = `${BASE_URL}/${base}USD=X?interval=1d&range=5d`;
     const res = await fetch(url, {
       headers: { "User-Agent": YAHOO_UA },
       signal: AbortSignal.timeout(4_000),
     });
-    if (!res.ok) return 1.10;
+    if (!res.ok) return null;
     const data = await res.json() as {
-      chart: { result: [{ indicators: { quote: [{ close: (number | null)[] }] } }] | null };
+      chart: { result: [{
+        meta?: { regularMarketPrice?: number };
+        indicators: { quote: [{ close: (number | null)[] }] };
+      }] | null };
     };
-    const closes = data.chart.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
-    const last = [...closes].reverse().find((c) => c != null && c > 0);
-    return last ?? 1.10;
+    const result = data.chart.result?.[0];
+    const metaPx = result?.meta?.regularMarketPrice;
+    const closes = result?.indicators?.quote?.[0]?.close ?? [];
+    const last   = (metaPx != null && metaPx > 0)
+      ? metaPx
+      : [...closes].reverse().find((c) => c != null && c > 0);
+    if (last == null || last <= 0) return null;
+
+    fxCache.set(base, { rate: last, at: Date.now() });
+    return isPence ? last / 100 : last;
   } catch {
-    return 1.10;
+    return null;
   }
 }
 

@@ -177,8 +177,14 @@ export default function StockCard({ stock }: Props) {
             <span className="text-xs text-gray-400 font-medium">{HORIZON_LABELS[horizon]}</span>
           </div>
           {a && (() => {
-            const currencySymbol = a.currency === "EUR" ? "€" : a.currency === "GBP" ? "£" : "$";
-            const priceDisplay   = `${currencySymbol}${a.price.toFixed(2)}`;
+            // Divisas sin símbolo conocido (DKK, SEK, CHF...) muestran su
+            // código tras el importe — un "$" delante de un precio en DKK
+            // hacía parecer que NOVO-B.CO cotizaba a 270 dólares.
+            const SYMBOLS: Record<string, string> = { USD: "$", EUR: "€", GBP: "£", GBp: "£" };
+            const symbol       = SYMBOLS[a.currency];
+            const priceDisplay = symbol
+              ? `${symbol}${a.price.toFixed(2)}`
+              : `${a.price.toFixed(2)} ${a.currency}`;
             const priceUSDNote   = a.currency !== "USD" && a.priceUSD
               ? `(~$${a.priceUSD.toFixed(2)})`
               : "";

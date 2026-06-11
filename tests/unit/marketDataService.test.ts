@@ -5,7 +5,10 @@ vi.mock("@/lib/finnhubClient", () => ({
 }));
 vi.mock("@/lib/yahooFinanceClient", () => ({
   fetchYahooCandles: vi.fn(),
-  fetchEURUSD: vi.fn().mockResolvedValue(1.1),
+  fetchFxToUSD: vi.fn().mockImplementation(async (cur: string) => {
+    const rates: Record<string, number> = { USD: 1, EUR: 1.1, DKK: 0.155 };
+    return rates[cur] ?? null;
+  }),
 }));
 
 import { getCurrentQuote } from "@/services/marketDataService";
@@ -56,6 +59,16 @@ describe("getCurrentQuote — fallback Finnhub → Yahoo", () => {
     const q = await getCurrentQuote("NOVO-B.CO");
     expect(q.price).toBe(270);
     expect(q.currency).toBe("DKK");
+    // FX de la divisa REAL (DKK→USD ≈ 0.155), no EURUSD: 270 DKK ≈ $41.85,
+    // no los ~$297 que salían aplicando 1.10
+    expect(q.priceUSD).toBeCloseTo(270 * 0.155, 2);
+  });
+
+  it("falla la cotización Yahoo si no hay FX para la divisa (mejor que valorar mal)", async () => {
+    vi.mocked(fetchQuote).mockRejectedValue(new Error("Finnhub quote error 403"));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(yahooChartResponse(100, "SEK")));
+
+    await expect(getCurrentQuote("VOLV-B.ST")).rejects.toThrow("Sin datos de precio");
   });
 
   it("usa Finnhub directamente para tickers con precio válido (USD)", async () => {
