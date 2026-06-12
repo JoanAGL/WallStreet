@@ -12,7 +12,7 @@ function tx(
 ): TransactionRecord {
   const date = new Date(Date.now() - daysAgo * DAY);
   return {
-    id: `${type}-${daysAgo}`,
+    id: `${type}-${daysAgo}-${shares}-${price}`,
     stockId: "stock-1",
     type,
     shares,
@@ -28,10 +28,11 @@ function ev(daysAgo: number, numerator: number, denominator: number): SplitEvent
   return { date: Date.now() - daysAgo * DAY, numerator, denominator };
 }
 
-describe("computePendingSplits", () => {
-  it("detecta un split posterior a la primera compra (caso NFLX 10:1)", () => {
+describe("computePendingSplits — detección con corroboración", () => {
+  it("aplica split 10:1 cuando el WAC pre-split es coherente con las compras post-split", () => {
+    // Compra pre-split a $1.090; tras el split compra a $96 → 1090/(10×96)≈1.13 ✓
     const pending = computePendingSplits(
-      [tx("BUY", 300), tx("SELL", 250, 5)],
+      [tx("BUY", 300, 2, 1090), tx("BUY", 150, 48, 96)],
       [ev(200, 10, 1)]
     );
     expect(pending).toHaveLength(1);
@@ -39,47 +40,81 @@ describe("computePendingSplits", () => {
     expect(pending[0].label).toBe("10:1");
   });
 
-  it("ignora splits anteriores a la primera compra (no afectan a la posición)", () => {
-    const pending = computePendingSplits([tx("BUY", 100)], [ev(200, 10, 1)]);
-    expect(pending).toHaveLength(0);
+  it("aplica split corroborando con el precio de mercado si no hay compras post-split", () => {
+    // WAC pre-split $1.090, mercado actual $96 → 1090/(10×96)≈1.13 ✓
+    const pending = computePendingSplits(
+      [tx("BUY", 300, 2, 1090)],
+      [ev(200, 10, 1)],
+      96
+    );
+    expect(pending).toHaveLength(1);
   });
 
-  it("no duplica si ya existe un SPLIT registrado a ±7 días del evento", () => {
+  it("RECHAZA el split si el historial ya está en términos post-split (caso NFLX)", () => {
+    // WAC pre-split ~$210 con compras post-split a ~$96:
+    // 210/(10×96)=0.22 fuera de [0.5,2] → el historial ya está ajustado
     const pending = computePendingSplits(
-      [tx("BUY", 300), tx("SPLIT", 198, 10, 1)],
+      [tx("BUY", 300, 23, 210), tx("BUY", 150, 32, 96)],
       [ev(200, 10, 1)]
     );
     expect(pending).toHaveLength(0);
   });
 
-  it("sí registra si el SPLIT existente está lejos del evento (otro split)", () => {
+  it("NO auto-aplica sin ninguna referencia de corroboración", () => {
+    // Sin compras post-split y sin precio de mercado → registro manual
     const pending = computePendingSplits(
-      [tx("BUY", 600), tx("SPLIT", 500, 2, 1)],
-      [ev(500, 2, 1), ev(100, 10, 1)]
+      [tx("BUY", 300, 2, 1090)],
+      [ev(200, 10, 1)]
     );
-    expect(pending).toHaveLength(1);
-    expect(pending[0].factor).toBe(10);
+    expect(pending).toHaveLength(0);
   });
 
-  it("contrasplit 1:10 produce factor 0.1", () => {
-    const pending = computePendingSplits([tx("BUY", 300)], [ev(100, 1, 10)]);
+  it("ignora splits sin posición abierta en la fecha del evento", () => {
+    const pending = computePendingSplits(
+      [tx("BUY", 300, 10, 1090), tx("SELL", 250, 10, 1100), tx("BUY", 150, 50, 96)],
+      [ev(200, 10, 1)],
+      96
+    );
+    expect(pending).toHaveLength(0);
+  });
+
+  it("ignora splits anteriores a la primera compra", () => {
+    const pending = computePendingSplits([tx("BUY", 100, 10, 96)], [ev(200, 10, 1)], 96);
+    expect(pending).toHaveLength(0);
+  });
+
+  it("no duplica si ya existe un SPLIT registrado a ±7 días del evento", () => {
+    const pending = computePendingSplits(
+      [tx("BUY", 300, 2, 1090), tx("SPLIT", 198, 10, 1)],
+      [ev(200, 10, 1)],
+      96
+    );
+    expect(pending).toHaveLength(0);
+  });
+
+  it("contrasplit 1:10 con corroboración produce factor 0.1", () => {
+    // Compra a $2; contrasplit 1:10 → precio esperado ~$20; mercado $22 ✓
+    const pending = computePendingSplits(
+      [tx("BUY", 300, 100, 2)],
+      [ev(100, 1, 10)],
+      22
+    );
     expect(pending).toHaveLength(1);
     expect(pending[0].factor).toBeCloseTo(0.1, 6);
     expect(pending[0].label).toBe("1:10");
   });
 
   it("sin compras no hay nada que ajustar", () => {
-    expect(computePendingSplits([], [ev(100, 10, 1)])).toHaveLength(0);
-    expect(computePendingSplits([tx("DIVIDEND", 300)], [ev(100, 10, 1)])).toHaveLength(0);
+    expect(computePendingSplits([], [ev(100, 10, 1)], 96)).toHaveLength(0);
+    expect(computePendingSplits([tx("DIVIDEND", 300)], [ev(100, 10, 1)], 96)).toHaveLength(0);
   });
 
-  it("ignora ratios degenerados (1:1) y ordena cronológicamente", () => {
+  it("ignora ratios degenerados (1:1)", () => {
     const pending = computePendingSplits(
-      [tx("BUY", 600)],
-      [ev(100, 1, 1), ev(50, 2, 1), ev(300, 10, 1)]
+      [tx("BUY", 600, 2, 1090)],
+      [ev(100, 1, 1)],
+      96
     );
-    expect(pending).toHaveLength(2);
-    expect(pending[0].label).toBe("10:1");
-    expect(pending[1].label).toBe("2:1");
+    expect(pending).toHaveLength(0);
   });
 });

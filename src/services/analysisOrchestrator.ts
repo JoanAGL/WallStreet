@@ -261,8 +261,13 @@ async function runFullAnalysis(
   // Phase 1.5: detección automática de splits corporativos (Yahoo, caché 24h
   // por ticker). Registra transacciones SPLIT pendientes antes de calcular
   // métricas para que el WAC ya refleje el ajuste. Nunca bloquea el pipeline.
+  // El precio USD del análisis previo sirve como referencia de corroboración.
   try {
-    await detectAndRegisterSplits(staleStocks.map((s) => ({ id: s.id, ticker: s.ticker })));
+    await detectAndRegisterSplits(staleStocks.map((s) => ({
+      id: s.id,
+      ticker: s.ticker,
+      currentPriceUSD: prevQuoteMap.get(s.id)?.priceUSD ?? null,
+    })));
   } catch (err) {
     console.warn("[ORCHESTRATOR] Detección de splits falló (continuando):", err);
   }

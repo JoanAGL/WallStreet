@@ -384,11 +384,13 @@ export default function StockCard({ stock }: Props) {
             </div>
           )}
 
-          {/* Panel de transacciones */}
+          {/* Panel de transacciones — precio SIEMPRE en USD: las transacciones
+              se almacenan en USD y mezclar divisas inflaba el valor actual
+              (NOVO: 12 × 282,55 DKK mostrado como 3.390 US$) */}
           <TransactionPanel
             stockId={stock.id}
             ticker={stock.ticker}
-            currentPrice={a?.price ?? null}
+            currentPrice={a ? (a.priceUSD ?? a.price) : null}
           />
 
           {/* Footer: timestamp + enlace historial */}

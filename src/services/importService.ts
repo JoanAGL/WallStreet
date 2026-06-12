@@ -218,6 +218,10 @@ export async function importDegiroCSV(
 
   // ── Parse data rows ──────────────────────────────────────────────────────
   const rows: DegiroRow[] = [];
+  // Filas en divisa extranjera SIN columna de tipo de cambio: se convierten
+  // después con el FX actual de Yahoo (aproximación — mejor que dejar un
+  // importe en EUR etiquetado como USD, caso NOVO a 45,15).
+  const pendingFx: { idx: number; cur: string; field: "precio" | "fee" }[] = [];
   for (const line of allLines.slice(headerIdx + 1)) {
     const cells   = parseCSVLine(line);
     const fecha   = (cells[col["fecha"]] ?? "").trim();
@@ -236,10 +240,14 @@ export async function importDegiroCSV(
     const currency    = (cells[col["precio"] + 1] ?? "").trim().toUpperCase() || "USD";
     // Exchange rate on this row (e.g. 1.1630 means 1 EUR = 1.1630 USD)
     const fxRate      = fxKey ? parseDegNum(cells[col[fxKey]] ?? "") : NaN;
+    const hasFx       = isFinite(fxRate) && fxRate > 0;
     // Convert to USD at parse time so mergePartialFills WAC is always in USD
-    const precioFinal = (currency !== "USD" && isFinite(fxRate) && fxRate > 0)
+    const precioFinal = (currency !== "USD" && hasFx)
       ? Math.round(precio * fxRate * 10000) / 10000
       : precio;
+    if (currency !== "USD" && !hasFx) {
+      pendingFx.push({ idx: rows.length, cur: currency, field: "precio" });
+    }
 
     // Costes de transacción: DEGIRO los expresa en la divisa de la cuenta y
     // negativos (cargo). La divisa va en la columna sin nombre siguiente; si
@@ -250,9 +258,14 @@ export async function importDegiroCSV(
       if (isFinite(rawFee) && rawFee !== 0) {
         const feeCurrency = (cells[col[feeKey] + 1] ?? "").trim().toUpperCase() || "USD";
         const absFee = Math.abs(rawFee);
-        fee = (feeCurrency !== "USD" && isFinite(fxRate) && fxRate > 0)
-          ? Math.round(absFee * fxRate * 100) / 100
-          : Math.round(absFee * 100) / 100;
+        if (feeCurrency !== "USD" && hasFx) {
+          fee = Math.round(absFee * fxRate * 100) / 100;
+        } else {
+          fee = Math.round(absFee * 100) / 100;
+          if (feeCurrency !== "USD") {
+            pendingFx.push({ idx: rows.length, cur: feeCurrency, field: "fee" });
+          }
+        }
       }
     }
 
@@ -262,6 +275,29 @@ export async function importDegiroCSV(
     rows.push({ fecha, hora, producto, isin, numero, precio: precioFinal, fee, orderId });
   }
   if (rows.length === 0) throw new Error("No se encontraron transacciones válidas en el archivo.");
+
+  // Conversión diferida a USD para filas sin tipo de cambio en el CSV.
+  // Usa el FX actual de Yahoo — aproximación aceptable frente a almacenar
+  // un importe en divisa extranjera etiquetado como USD.
+  if (pendingFx.length > 0) {
+    const { fetchFxToUSD } = await import("@/lib/yahooFinanceClient");
+    const rates = new Map<string, number | null>();
+    for (const cur of Array.from(new Set(pendingFx.map((p) => p.cur)))) {
+      rates.set(cur, await fetchFxToUSD(cur).catch(() => null));
+    }
+    for (const p of pendingFx) {
+      const rate = rates.get(p.cur);
+      if (rate == null || rate <= 0) {
+        console.warn(`[IMPORT] Sin FX ${p.cur}→USD: la fila ${p.idx} queda sin convertir (${p.field}).`);
+        continue;
+      }
+      if (p.field === "precio") {
+        rows[p.idx].precio = Math.round(rows[p.idx].precio * rate * 10000) / 10000;
+      } else {
+        rows[p.idx].fee = Math.round(rows[p.idx].fee * rate * 100) / 100;
+      }
+    }
+  }
 
   // CRITICAL: DEGIRO exports newest-first → reverse for chronological WAC
   rows.reverse();

@@ -54,17 +54,50 @@ export interface PendingSplit {
   label:  string;  // "10:1"
 }
 
+/** Estado de la posición (acciones abiertas y WAC en USD) justo antes de `atMs`. */
+function positionAt(txs: TransactionRecord[], atMs: number): { open: number; avg: number } {
+  const sorted = [...txs].sort((a, b) => {
+    const da = (a.date ?? a.createdAt).getTime();
+    const db = (b.date ?? b.createdAt).getTime();
+    return da - db || a.createdAt.getTime() - b.createdAt.getTime();
+  });
+  let open = 0, avg = 0;
+  for (const tx of sorted) {
+    if ((tx.date ?? tx.createdAt).getTime() >= atMs) break;
+    if (tx.type === "SPLIT") {
+      if (tx.shares > 0 && open > 0) { open *= tx.shares; avg /= tx.shares; }
+    } else if (tx.type === "DIVIDEND") {
+      continue;
+    } else if (tx.type === "BUY") {
+      const total = avg * open + tx.price * tx.shares + (tx.fee ?? 0);
+      open += tx.shares;
+      avg = open > 0 ? total / open : 0;
+    } else {
+      open = Math.max(0, open - Math.min(tx.shares, open));
+    }
+  }
+  return { open, avg };
+}
+
 /**
  * Decide qué splits del histórico de Yahoo faltan por registrar.
- * Seguro frente a dobles aplicaciones:
- * - Solo eventos posteriores a la primera COMPRA (los anteriores son no-op
- *   para la posición y solo añadirían ruido).
- * - Se omite si ya existe una transacción SPLIT a ±7 días del evento
- *   (registrada a mano o por una detección anterior).
+ *
+ * Salvaguardas contra dobles aplicaciones y datos ya ajustados:
+ * - Solo eventos posteriores a la primera COMPRA con posición abierta en la
+ *   fecha del evento.
+ * - Se omite si ya existe una transacción SPLIT a ±7 días del evento.
+ * - CORROBORACIÓN OBLIGATORIA: el WAC en la fecha del split, dividido por el
+ *   factor, debe ser coherente con (a) el precio medio de las compras
+ *   posteriores al split, o en su defecto (b) el precio de mercado actual.
+ *   Sin esta comprobación, un historial mixto o ya ajustado (caso NFLX:
+ *   compras registradas en precios post-split) se multiplicaría por error.
+ *   Si no hay forma de corroborar, NO se auto-aplica — queda el registro
+ *   manual desde el panel.
  */
 export function computePendingSplits(
   txs: TransactionRecord[],
-  events: SplitEvent[]
+  events: SplitEvent[],
+  currentPriceUSD?: number | null
 ): PendingSplit[] {
   const buys = txs.filter((t) => t.type === "BUY");
   if (buys.length === 0) return [];
@@ -80,6 +113,32 @@ export function computePendingSplits(
       (s) => Math.abs((s.date ?? s.createdAt).getTime() - ev.date) <= MATCH_WINDOW_MS
     );
     if (already) continue;
+
+    // Sin posición abierta en la fecha del evento, el split es un no-op
+    const at = positionAt(txs, ev.date);
+    if (at.open <= 1e-9 || at.avg <= 0) continue;
+
+    // Corroboración: WAC pre-split / factor ≈ referencia post-split
+    const postBuys = buys.filter((t) => (t.date ?? t.createdAt).getTime() > ev.date);
+    let reference: number | null = null;
+    if (postBuys.length > 0) {
+      const shares = postBuys.reduce((s, t) => s + t.shares, 0);
+      reference = postBuys.reduce((s, t) => s + t.price * t.shares, 0) / shares;
+    } else if (currentPriceUSD != null && currentPriceUSD > 0) {
+      reference = currentPriceUSD;
+    }
+    if (reference == null) continue; // sin referencia no se auto-aplica
+
+    const impliedRatio = at.avg / (factor * reference);
+    if (impliedRatio < 0.5 || impliedRatio > 2) {
+      console.log(
+        `[SPLITS] Split ${ev.numerator}:${ev.denominator} descartado: WAC pre-split ` +
+        `${at.avg.toFixed(2)} / factor no es coherente con la referencia ${reference.toFixed(2)} ` +
+        `(ratio ${impliedRatio.toFixed(2)}) — el historial parece ya ajustado.`
+      );
+      continue;
+    }
+
     pending.push({
       date:   new Date(ev.date),
       factor: Math.round(factor * 1e6) / 1e6,
@@ -98,7 +157,7 @@ export function computePendingSplits(
  * se recalcula solo.
  */
 export async function detectAndRegisterSplits(
-  stocks: { id: string; ticker: string }[]
+  stocks: { id: string; ticker: string; currentPriceUSD?: number | null }[]
 ): Promise<number> {
   let inserted = 0;
   for (const s of stocks) {
@@ -108,7 +167,7 @@ export async function detectAndRegisterSplits(
       const events = await fetchSplitEvents(s.ticker);
       if (events.length === 0) continue;
 
-      const pending = computePendingSplits(txs, events);
+      const pending = computePendingSplits(txs, events, s.currentPriceUSD ?? null);
       for (const p of pending) {
         await createTransaction({
           stockId: s.id,
