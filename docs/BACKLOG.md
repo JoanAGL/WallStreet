@@ -1,14 +1,27 @@
 # Backlog de nuevas funcionalidades — auditoría completa (junio 2026)
 
-> Pendiente de abrir como issue (la integración no tenía permiso `issues:write`).
-> Backlog identificado tras auditoría del código, el historial de transacciones DEGIRO
-> y los cuatro apartados de la app (Dashboard, Rendimiento, Simulación, Insights).
-> No duplica las issues abiertas #18 (alertas), #19 (auto-refresh), #20 (vista
-> comparativa), #49 (regime classifier) ni #53 (webhooks).
+> Registrado como issue #63. Backlog identificado tras auditoría del código, el
+> historial de transacciones DEGIRO y los cuatro apartados de la app (Dashboard,
+> Rendimiento, Simulación, Insights). No duplica las issues abiertas #18 (alertas),
+> #19 (auto-refresh), #20 (vista comparativa) ni #53 (webhooks).
+
+## Estado (actualizado 12/06/2026)
+
+| # | Feature | Estado |
+|---|---------|--------|
+| 1 | Splits y contrasplits | ✅ PRs #65 (motor + UI), #68 (detección automática), #70 (corroboración) |
+| 2 | Comisiones y dividendos | ✅ PR #65 |
+| 3 | Equity curve + TWR | ✅ PR #71 (el benchmark SPY real se adelantó en #64) |
+| 4 | Informe fiscal (IRPF) | ⬜ Pendiente |
+| 5 | Watchlist | ⬜ Pendiente (el contador del límite ya ignora cerradas, #64) |
+| 6 | Multi-broker | ⬜ Pendiente |
+| 7 | Efectivo y aportaciones | ⬜ Pendiente |
+
+El clasificador de régimen de mercado (issue #49) también quedó implementado en #71.
 
 ---
 
-## 1. Gestión de splits y acciones corporativas
+## 1. ✅ Gestión de splits y acciones corporativas
 
 **Motivación:** el split 10:1 de NFLX (nov 2025) es visible en los datos reales: precio
 medio de venta de **1.112,17 US$** conviviendo con precio actual de 81,41 US$ y compra
@@ -21,7 +34,7 @@ descarte el caso por el filtro de ratio >5×.
 - Detección automática opcional vía Yahoo Finance (`events=splits` del endpoint chart)
 - UI en el TransactionPanel para registrar un split manualmente
 
-## 2. Comisiones y dividendos en el motor de transacciones
+## 2. ✅ Comisiones y dividendos en el motor de transacciones
 
 **Motivación:** el CSV de DEGIRO incluye columnas de costes de transacción que hoy se
 descartan, y varias posiciones pagan dividendo (ORCL 1.0%, CRM 1.0%, NVDA 0.5%) que no se
@@ -34,7 +47,7 @@ refleja en el P&L. El rendimiento mostrado está sobreestimado.
   en lugar del actual `breakEvenPrice = avgBuyPrice` (hoy «Precio equilibrio» siempre
   duplica el precio medio de compra y no aporta información)
 
-## 3. Curva de evolución de cartera (equity curve) con TWR y benchmark continuo
+## 3. ✅ Curva de evolución de cartera (equity curve) con TWR y benchmark continuo
 
 **Motivación:** no existe ninguna vista de la evolución temporal del valor de la cartera.
 Además, el benchmark de Insights usa una tabla `SPY_HISTORY` hardcodeada con interpolación
@@ -84,13 +97,10 @@ sobre el capital aportado ni saber el % invertido vs. liquidez.
 
 ---
 
-## Priorización sugerida
+## Priorización sugerida (restante)
 
 | Prioridad | Feature | Razón |
 |---|---|---|
-| Alta | 1. Splits | Hay datos corruptos visibles hoy (NFLX) |
-| Alta | 2. Comisiones/dividendos | P&L sobreestimado en todas las vistas |
-| Media | 3. Equity curve + TWR | Mayor valor visual/analítico |
-| Media | 5. Watchlist | Desbloquea el límite 20/20 actual |
+| Media | 5. Watchlist | Seguimiento sin coste de análisis |
 | Baja | 4. Informe fiscal | Estacional (campaña renta) |
 | Baja | 6. Multi-broker, 7. Cash | Dependen de adopción |
