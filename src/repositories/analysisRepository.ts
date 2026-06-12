@@ -12,6 +12,7 @@ export interface UpsertAnalysisData {
   sma20: number | null;
   sma50: number | null;
   rsi14: number | null;
+  marketRegime: string | null;
   newsSummary: string;
   newsSentiment: string;
   analysisText: string;

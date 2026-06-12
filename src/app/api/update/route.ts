@@ -19,6 +19,7 @@ import {
 import type { AllHorizonsAIAnalysis } from "@/services/aiAnalysisService";
 import type { InvestmentHorizon } from "@/types/models";
 import type { UpdateType } from "@/types/updateTypes";
+import { capturePortfolioSnapshot } from "@/services/portfolioSnapshotService";
 import { STOCK_UPDATE_TYPES } from "@/types/updateTypes";
 
 const RATE_LIMIT_MS      = 5 * 60 * 1000; // full AI update: 5 min
@@ -128,6 +129,11 @@ export async function POST(req: NextRequest) {
       }
     }
   }
+
+  // Snapshot diario de cartera (equity curve / TWR) — fire-and-forget
+  capturePortfolioSnapshot(userId).catch((e) =>
+    console.warn("[UPDATE] Snapshot de cartera falló:", e)
+  );
 
   const succeeded = results.filter((r) => r.success && !r.skipped).length;
   const cached    = results.filter((r) => r.skipped).length;

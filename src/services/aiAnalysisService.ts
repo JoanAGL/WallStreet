@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { geminiChat, STATIC_SYSTEM_INSTRUCTION } from "@/lib/geminiClient";
+import { REGIME_BIAS, classifyRegimeSafe, type CombinedMarketRegime } from "@/services/quantitativeService";
 import type { TechnicalIndicators } from "./technicalAnalysisService";
 import type { NewsAnalysis, Sentiment } from "./newsAnalysisService";
 import type { FundamentalMetrics, MediumTermFundamentals, LongTermFundamentals, AllFundamentals } from "@/lib/yahooFinanceClient";
@@ -345,6 +346,10 @@ export async function generateAllHorizonsAnalysis(
     news:  { summary: newsAnalysis.summary, sentiment: newsAnalysis.sentiment },
     fg:    fearGreedScore ?? null,
     quant: quantMetrics ? { sharpe: quantMetrics.sharpeRatio, kelly: quantMetrics.kellyFraction, weight: quantMetrics.portfolioWeight, corr: quantMetrics.correlatedTickers } : null,
+    regime: (() => {
+      const r = classifyRegimeSafe(indicators.hurstExponent, indicators.rsi14, indicators.relVolume, quantMetrics?.volatility30d ?? null);
+      return r ? { state: r, bias: REGIME_BIAS[r] } : null;
+    })(),
     degraded: false,
   };
 
@@ -394,6 +399,8 @@ export interface BatchStockInput {
   quantMetrics?: PortfolioQuantMetrics | null;
   fearGreedScore?: number | null;
   earningsGuidance?: EarningsGuidanceInsight | null;
+  /** Régimen de mercado combinado (issue #49) — añade ~15 tokens al prompt */
+  marketRegime?: CombinedMarketRegime | null;
   dataQuality?: DataQuality;
 }
 
@@ -475,6 +482,7 @@ function buildBatchPrompt(
       news:     { summary: inp.newsAnalysis.summary, sentiment: inp.newsAnalysis.sentiment },
       fg:       inp.fearGreedScore ?? null,
       quant:    qm ? { sharpe: qm.sharpeRatio, kelly: qm.kellyFraction, weight: qm.portfolioWeight, corr: qm.correlatedTickers } : null,
+      regime:   inp.marketRegime ? { state: inp.marketRegime, bias: REGIME_BIAS[inp.marketRegime] } : null,
       degraded: inp.dataQuality?.degraded ?? false,
     };
   });

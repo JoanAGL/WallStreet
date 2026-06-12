@@ -7,7 +7,7 @@ import { analyzeNewsForTicker, fetchAllArticlesInParallel, batchAnalyzeSentiment
 import type { DataIssue, NewsAnalysis, Sentiment } from "./newsAnalysisService";
 import { batchGenerateAllHorizons, FALLBACK_HORIZON } from "./aiAnalysisService";
 import type { AllHorizonsAIAnalysis, HorizonAnalysis, BatchStockInput, DataQuality } from "./aiAnalysisService";
-import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore } from "./quantitativeService";
+import { calculatePortfolioQuantMetrics, findTickerMetrics, calculateFearGreedScore, classifyRegimeSafe } from "./quantitativeService";
 import { getGlobalContext } from "./macroService";
 import type { MacroGlobalContext } from "./macroService";
 import { fetchAllEarningsGuidance } from "./earningsService";
@@ -456,6 +456,14 @@ async function runFullAnalysis(
       : null;
     const earningsGuidance = earningsData[i] ?? null;
 
+    // Régimen de mercado combinado (issue #49): Hurst + RSI + volumen + GARCH
+    const marketRegime = classifyRegimeSafe(
+      indicators.hurstExponent,
+      indicators.rsi14,
+      indicators.relVolume,
+      quantMetrics?.volatility30d ?? null
+    );
+
     // Finalise dataQuality.news: true when articles were actually fetched for this ticker
     const newsOk = rawArticlesResult.status === "fulfilled" && articlesData[i].articles.length > 0;
     const finalDataQuality: DataQuality = {
@@ -475,6 +483,7 @@ async function runFullAnalysis(
       quantMetrics,
       fearGreedScore,
       earningsGuidance,
+      marketRegime,
       dataQuality: finalDataQuality,
     };
   });
@@ -490,7 +499,7 @@ async function runFullAnalysis(
 
   // Phase 6: Persist results in parallel
   const persistResults = await Promise.allSettled(
-    withMarket.map(async ({ stock, quote, indicators, allFundamentals }) => {
+    withMarket.map(async ({ stock, quote, indicators, allFundamentals }, i) => {
       const horizon: InvestmentHorizon = stock.investmentHorizon ?? "SHORT_TERM";
       const newsAnalysis = newsAnalysisMap.get(stock.ticker)!;
       const allAI = allHorizonsMap.get(stock.ticker) ?? {
@@ -505,6 +514,7 @@ async function runFullAnalysis(
           price: quote.price, priceUSD: quote.priceUSD, currency: quote.currency,
           changePercent: quote.changePercent,
           sma20: indicators.sma20, sma50: indicators.sma50, rsi14: indicators.rsi14,
+          marketRegime: batchInputs[i]?.marketRegime ?? null,
           newsSummary: newsAnalysis.summary, newsSentiment: newsAnalysis.sentiment,
           analysisText: active.analysisText,
           scenarioLabel: active.scenarioLabel,

@@ -37,6 +37,7 @@ export interface StockAnalysisModel {
   sma20: number | null;
   sma50: number | null;
   rsi14: number | null;
+  marketRegime: string | null;   // CombinedMarketRegime (issue #49)
   newsSummary: string;
   newsSentiment: string;
   analysisText: string;
