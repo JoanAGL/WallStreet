@@ -2,6 +2,8 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { getPortfolioMetrics } from "@/services/transactionService";
+import { getEquityCurve } from "@/services/portfolioSnapshotService";
+import EquityCurve from "@/components/dashboard/EquityCurve";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 
@@ -25,7 +27,10 @@ export default async function PortfolioPage() {
     if (usd > 0) currentPrices[a.stockId] = usd;
   }
 
-  const summary = await getPortfolioMetrics(session.user.id, currentPrices);
+  const [summary, equityCurve] = await Promise.all([
+    getPortfolioMetrics(session.user.id, currentPrices),
+    getEquityCurve(session.user.id),
+  ]);
 
   const fmtUSD = (n: number) =>
     n.toLocaleString("es-ES", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
@@ -92,6 +97,9 @@ export default async function PortfolioPage() {
               {unpriced.map((p) => p.ticker).join(", ")}. Pulsa «Actualizar datos» en el dashboard.
             </p>
           )}
+
+          {/* ── Equity curve + TWR ── */}
+          <EquityCurve curve={equityCurve} />
 
           {/* ── Per-position cards ── */}
           <div className="space-y-4">

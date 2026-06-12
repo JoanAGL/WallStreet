@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runAnalysisForStocks } from "@/services/analysisOrchestrator";
 import { isCronAuthorized, unauthorizedResponse } from "@/lib/cronAuth";
+import { capturePortfolioSnapshot } from "@/services/portfolioSnapshotService";
 
 export async function GET(req: NextRequest) {
   if (!isCronAuthorized(req)) return unauthorizedResponse();
@@ -20,6 +21,18 @@ export async function GET(req: NextRequest) {
     }
 
     const results = await runAnalysisForStocks(stocks);
+
+    // Snapshot diario por usuario (equity curve / TWR)
+    const userIds = await prisma.stock.findMany({
+      select: { userId: true }, distinct: ["userId"],
+    });
+    await Promise.allSettled(
+      userIds.map(({ userId }) =>
+        capturePortfolioSnapshot(userId).catch((e) =>
+          console.warn(`[CRON] Snapshot falló para ${userId}:`, e)
+        )
+      )
+    );
 
     const succeeded = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success);

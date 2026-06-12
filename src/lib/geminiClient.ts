@@ -38,6 +38,15 @@ export const STATIC_SYSTEM_INSTRUCTION =
   "  ctx.risk=Agresivo → permite confidenceScore > 80 con convergencia de señales.\n" +
   "  stock.degraded=true → reduce confidenceScore; infiere con mayor cautela.\n\n" +
 
+  "RÉGIMEN DE MERCADO (stock.regime, cuando está presente):\n" +
+  "  regime.state clasifica el activo (Hurst + GARCH + RSI + volumen) y regime.bias indica el sesgo a aplicar:\n" +
+  "  TRENDING_BULL → sesga escenario POSITIVO en shortTerm.\n" +
+  "  TRENDING_BEAR → sesga escenario NEGATIVO en shortTerm.\n" +
+  "  MEAN_REVERTING → el escenario NEUTRAL tiene el mayor peso estadístico.\n" +
+  "  RANDOM_WALK → escenarios equiprobables; amplía los intervalos de confianza y modera confidenceScore.\n" +
+  "  HIGH_VOLATILITY → amplía rangos de precios objetivo y la dispersión entre escenarios.\n" +
+  "  VOLATILITY_CRUSH → estrecha rangos de precios objetivo; baja dispersión esperada.\n\n" +
+
   "ANCLA FUNDAMENTAL LYNCH (fund.pegLynch):\n" +
   "  Cuando fund.pegLynch.cls está presente, úsalo como señal de convicción fundamental para mediumTerm y longTerm.\n" +
   "  ULTRA_GANGA   (score=100) → sesga COMPRA en mediumTerm/longTerm salvo RSI > 75 o macro impact=HIGH adverso.\n" +

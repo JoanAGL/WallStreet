@@ -190,3 +190,81 @@ export function calculatePeterLynchPeg(per: number, epsGrowth: number): PegInsig
   if (!isFinite(per) || per <= 0 || !isFinite(epsGrowth) || epsGrowth <= 0) return NO_PEG;
   return applyLynchThresholds(per / epsGrowth);
 }
+
+// ── Market Regime Classifier (Hurst + GARCH + RSI) — issue #49 ────────────────
+
+/**
+ * Régimen de mercado combinado. A diferencia del MarketRegime de
+ * technicalAnalysisService (solo Hurst), este clasificador cruza persistencia
+ * (Hurst), momentum (RSI14), actividad (volumen relativo) y volatilidad
+ * condicional GARCH(1,1) anualizada.
+ */
+export type CombinedMarketRegime =
+  | "TRENDING_BULL"
+  | "TRENDING_BEAR"
+  | "MEAN_REVERTING"
+  | "RANDOM_WALK"
+  | "HIGH_VOLATILITY"
+  | "VOLATILITY_CRUSH";
+
+/**
+ * Clasifica el régimen de mercado de un activo.
+ *
+ * Umbrales:
+ * - garchVolAnnualized > 0.40 (40% anualizada) o relativeVolume > 3 → HIGH_VOLATILITY
+ * - garchVolAnnualized < 0.15 → VOLATILITY_CRUSH
+ * - hurst > 0.6 y RSI > 55 → TRENDING_BULL
+ * - hurst > 0.6 y RSI < 45 → TRENDING_BEAR
+ * - hurst < 0.45 → MEAN_REVERTING
+ * - resto → RANDOM_WALK
+ *
+ * @param hurstExponent      Exponente de Hurst (R/S), típicamente 0.3–0.7
+ * @param rsi14              RSI de 14 períodos, 0–100
+ * @param relativeVolume     Volumen relativo vs media 20 sesiones (1 = normal)
+ * @param garchVolAnnualized Volatilidad GARCH(1,1) anualizada como FRACCIÓN (0.40 = 40%)
+ */
+export function classifyRegime(
+  hurstExponent: number,
+  rsi14: number,
+  relativeVolume: number,
+  garchVolAnnualized: number
+): CombinedMarketRegime {
+  // Un pico de volumen >3× corrobora un evento de volatilidad aunque la
+  // GARCH (ventana 60d) aún no lo haya capturado del todo
+  if (garchVolAnnualized > 0.40 || relativeVolume > 3) return "HIGH_VOLATILITY";
+  if (garchVolAnnualized < 0.15) return "VOLATILITY_CRUSH";
+  if (hurstExponent > 0.6 && rsi14 > 55) return "TRENDING_BULL";
+  if (hurstExponent > 0.6 && rsi14 < 45) return "TRENDING_BEAR";
+  if (hurstExponent < 0.45) return "MEAN_REVERTING";
+  return "RANDOM_WALK";
+}
+
+/** Sesgo por régimen inyectado en el prompt de Gemini (~15 tokens por activo). */
+export const REGIME_BIAS: Record<CombinedMarketRegime, string> = {
+  TRENDING_BULL:    "Bias toward POSITIVE short-term scenario.",
+  TRENDING_BEAR:    "Bias toward NEGATIVE short-term scenario.",
+  MEAN_REVERTING:   "NEUTRAL scenario has highest statistical weight.",
+  RANDOM_WALK:      "Scenarios equiprobable; widen confidence intervals.",
+  HIGH_VOLATILITY:  "Widen price target ranges; increase scenario dispersion.",
+  VOLATILITY_CRUSH: "Narrow price target ranges; low dispersion expected.",
+};
+
+/**
+ * Variante tolerante a datos ausentes para el pipeline: devuelve null si
+ * faltan Hurst o RSI (sin ellos el régimen no es interpretable). El volumen
+ * relativo ausente se asume 1 (normal) y la GARCH ausente 0.25 (zona neutra).
+ */
+export function classifyRegimeSafe(
+  hurstExponent: number | null | undefined,
+  rsi14: number | null | undefined,
+  relativeVolume: number | null | undefined,
+  garchVolAnnualizedPct: number | null | undefined  // en %, como volatility30d
+): CombinedMarketRegime | null {
+  if (hurstExponent == null || rsi14 == null) return null;
+  return classifyRegime(
+    hurstExponent,
+    rsi14,
+    relativeVolume ?? 1,
+    garchVolAnnualizedPct != null ? garchVolAnnualizedPct / 100 : 0.25
+  );
+}
