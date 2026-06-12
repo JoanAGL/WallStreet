@@ -103,6 +103,8 @@ function parseDegDate(fecha: string, hora: string): Date {
   return new Date(y, mo - 1, d, h, m, 0, 0);
 }
 
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface DegiroRow {
@@ -212,9 +214,18 @@ export async function importDegiroCSV(
   const fxKey = ["tipo de cambio", "tipo cambio", "exchange rate"]
     .find((k) => k in col) ?? null;
 
-  // Costes de transacción (comisión del broker por operación)
-  const feeKey = ["costes de transaccion", "costes de transaccion y/o", "transaction costs", "transaction and/or third"]
-    .find((k) => k in col) ?? null;
+  // Costes de transacción: el nombre real incluye sufijos variables
+  // ("Costes de transacción y/o externos EUR"), así que se resuelve por prefijo
+  const feeKey = Object.keys(col).find(
+    (k) => k.startsWith("costes de transaccion") || k.startsWith("transaction costs") || k.startsWith("transaction and/or")
+  ) ?? null;
+  // Comisión AutoFX (cambio de divisa automático) — también es un coste real
+  const autoFxKey = Object.keys(col).find(
+    (k) => k.startsWith("comision autofx") || k.startsWith("autofx")
+  ) ?? null;
+  // La divisa de los costes viene en la propia cabecera ("... EUR");
+  // por defecto EUR (divisa de la cuenta DEGIRO)
+  const feeCurrency = feeKey?.endsWith(" usd") ? "USD" : "EUR";
 
   // ── Parse data rows ──────────────────────────────────────────────────────
   const rows: DegiroRow[] = [];
@@ -249,28 +260,38 @@ export async function importDegiroCSV(
       pendingFx.push({ idx: rows.length, cur: currency, field: "precio" });
     }
 
-    // Costes de transacción: DEGIRO los expresa en la divisa de la cuenta y
-    // negativos (cargo). La divisa va en la columna sin nombre siguiente; si
-    // no es USD se convierte con el mismo tipo de cambio de la fila.
+    // Costes: comisión de transacción + comisión AutoFX, en la divisa de la
+    // cuenta (cabecera) y negativos (cargo). Se convierten a USD con el FX de
+    // la fila o, si falta, con el fallback posterior.
     let fee = 0;
-    if (feeKey) {
-      const rawFee = parseDegNum(cells[col[feeKey]] ?? "");
-      if (isFinite(rawFee) && rawFee !== 0) {
-        const feeCurrency = (cells[col[feeKey] + 1] ?? "").trim().toUpperCase() || "USD";
-        const absFee = Math.abs(rawFee);
-        if (feeCurrency !== "USD" && hasFx) {
-          fee = Math.round(absFee * fxRate * 100) / 100;
-        } else {
-          fee = Math.round(absFee * 100) / 100;
-          if (feeCurrency !== "USD") {
-            pendingFx.push({ idx: rows.length, cur: feeCurrency, field: "fee" });
-          }
+    const rawFee    = feeKey    ? parseDegNum(cells[col[feeKey]]    ?? "") : NaN;
+    const rawAutoFx = autoFxKey ? parseDegNum(cells[col[autoFxKey]] ?? "") : NaN;
+    const feeNative = (isFinite(rawFee) ? Math.abs(rawFee) : 0)
+                    + (isFinite(rawAutoFx) ? Math.abs(rawAutoFx) : 0);
+    if (feeNative > 0) {
+      if (feeCurrency !== "USD" && hasFx) {
+        fee = Math.round(feeNative * fxRate * 100) / 100;
+      } else {
+        fee = Math.round(feeNative * 100) / 100;
+        if (feeCurrency !== "USD") {
+          pendingFx.push({ idx: rows.length, cur: feeCurrency, field: "fee" });
         }
       }
     }
 
-    // Order ID (Bug A: used to collapse partial fills of the same order)
-    const orderId = orderIdKey ? (cells[col[orderIdKey]] ?? "").trim() : "";
+    // Order ID (agrupa ejecuciones parciales de la misma orden). En exports
+    // recientes de DEGIRO el GUID puede venir en una columna extra sin nombre
+    // al final de la fila en vez de en «ID Orden» — sin esto, dos fills de la
+    // misma orden no se fusionan y el dedupe puede tragarse uno (caso SAB.MC:
+    // venta de 726 en 2 fills de 363 idénticos → solo importaba uno).
+    let orderId = orderIdKey ? (cells[col[orderIdKey]] ?? "").trim() : "";
+    if (!GUID_RE.test(orderId)) {
+      orderId = "";
+      for (let k = cells.length - 1; k >= Math.max(0, cells.length - 3); k--) {
+        const v = (cells[k] ?? "").trim();
+        if (GUID_RE.test(v)) { orderId = v; break; }
+      }
+    }
 
     rows.push({ fecha, hora, producto, isin, numero, precio: precioFinal, fee, orderId });
   }
@@ -346,11 +367,16 @@ export async function importDegiroCSV(
     where:  { stockId: { in: stockIds } },
     select: { stockId: true, type: true, shares: true, price: true, date: true },
   });
-  const dedupSet = new Set(
-    existingTxs.map((t) =>
-      `${t.stockId}|${t.type}|${t.shares}|${t.price}|${t.date?.getTime() ?? 0}`
-    )
-  );
+  // Multiconjunto (clave → nº de apariciones en BD): dos fills LEGÍTIMOS con
+  // misma clave (tipo, acciones, precio y fecha-hora idénticos) deben poder
+  // importarse ambos; un Set se tragaba el segundo como si fuera un duplicado.
+  // La reimportación sigue siendo idempotente: cada fila del CSV consume una
+  // aparición existente en BD antes de poder insertarse.
+  const dedupCount = new Map<string, number>();
+  for (const t of existingTxs) {
+    const k = `${t.stockId}|${t.type}|${t.shares}|${t.price}|${t.date?.getTime() ?? 0}`;
+    dedupCount.set(k, (dedupCount.get(k) ?? 0) + 1);
+  }
 
   // ── Phase 4: build insert list ────────────────────────────────────────────
   type TxInsert = {
@@ -369,10 +395,12 @@ export async function importDegiroCSV(
     // row.precio is already in USD (converted at parse time, before mergePartialFills)
     // La fee no entra en la clave de dedupe: reimportar un CSV antiguo sin
     // columna de costes no debe duplicar transacciones ya existentes.
-    const key = `${stockId}|${type}|${shares}|${row.precio}|${date.getTime()}`;
-    if (!dedupSet.has(key)) {
+    const key  = `${stockId}|${type}|${shares}|${row.precio}|${date.getTime()}`;
+    const left = dedupCount.get(key) ?? 0;
+    if (left > 0) {
+      dedupCount.set(key, left - 1);  // ya existe en BD → omitir esta aparición
+    } else {
       toInsert.push({ stockId, type, shares, price: row.precio, fee: row.fee, date });
-      dedupSet.add(key);
     }
   }
   const skipped = mergedRows.length - toInsert.length;
