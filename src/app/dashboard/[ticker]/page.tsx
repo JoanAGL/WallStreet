@@ -125,7 +125,6 @@ export default async function TickerDetailPage({ params }: Props) {
 
   const fmt = (n: number | null, decimals = 2, suffix = "") =>
     n != null ? `${n.toFixed(decimals)}${suffix}` : "—";
-  const fmtPct  = (n: number | null) => n != null ? `${n >= 0 ? "+" : ""}${n.toFixed(2)}%` : "—";
   const fmtMult = (n: number | null) => n != null ? `${n.toFixed(2)}x` : "—";
 
   return (
