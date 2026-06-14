@@ -69,6 +69,19 @@ export default function PortfolioSummary({ stocks, realizedPnL }: Props) {
   const totalPnl     = priced.length > 0 ? totalValue - totalCost : null;
   const totalPnlPct  = totalPnl != null && totalCost > 0 ? (totalPnl / totalCost) * 100 : null;
 
+  // CAGR — computed from the earliest purchaseDate of positions with cost data
+  const earliestDate = withPosition
+    .map((s) => s.purchaseDate)
+    .filter(Boolean)
+    .reduce<Date | null>((min, d) => (!min || d! < min ? d! : min), null);
+  const yearsHeld = earliestDate
+    ? (Date.now() - earliestDate.getTime()) / (365.25 * 24 * 3600 * 1000)
+    : null;
+  const cagr =
+    yearsHeld != null && yearsHeld > 0 && totalCost > 0 && totalValue > 0
+      ? (Math.pow(totalValue / totalCost, 1 / yearsHeld) - 1) * 100
+      : null;
+
   const leanPos = positivo > negativo;
   const leanNeg = negativo > positivo;
   const containerStyle: React.CSSProperties = {
@@ -163,6 +176,19 @@ export default function PortfolioSummary({ stocks, realizedPnL }: Props) {
                 {realizedPnL >= 0 ? "+" : ""}{fmtMoney(realizedPnL)}
               </span>
             </span>
+          )}
+
+          {/* CAGR */}
+          {cagr != null && (
+            <>
+              <span style={{ color: "var(--fg-5)" }}>·</span>
+              <span style={{ color: "var(--fg-5)" }} title={`Desde ${earliestDate!.toLocaleDateString("es-ES")} · ${yearsHeld!.toFixed(1)} años`}>
+                CAGR:{" "}
+                <span style={{ fontWeight: 600, color: cagr >= 0 ? "#4ADE80" : "#F87171" }}>
+                  {cagr >= 0 ? "+" : ""}{cagr.toFixed(2)}%/año
+                </span>
+              </span>
+            </>
           )}
 
           {/* Combined total — only when realized P&L exists */}

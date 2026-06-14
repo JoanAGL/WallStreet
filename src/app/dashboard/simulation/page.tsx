@@ -384,6 +384,193 @@ function OptimizationSection() {
   );
 }
 
+// ── DCA / Lump-Sum Simulator ─────────────────────────────────────────────────
+
+interface DcaPoint { date: string; price: number }
+
+function DcaChart({ dca, lump, labels }: { dca: number[]; lump: number[]; labels: string[] }) {
+  const W = 600; const H = 180;
+  const PAD = { top: 12, right: 16, bottom: 28, left: 64 };
+  const cW = W - PAD.left - PAD.right;
+  const cH = H - PAD.top - PAD.bottom;
+  const allVals = [...dca, ...lump];
+  const minV = Math.min(...allVals);
+  const maxV = Math.max(...allVals);
+  const range = maxV - minV || 1;
+  const n = dca.length;
+  const x = (i: number) => PAD.left + (i / (n - 1)) * cW;
+  const y = (v: number) => PAD.top + cH - ((v - minV) / range) * cH;
+  const poly = (arr: number[]) => arr.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+  const fmt = (v: number) =>
+    v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M`
+    : v >= 1_000 ? `$${(v / 1_000).toFixed(0)}K`
+    : `$${v.toFixed(0)}`;
+  const yTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => minV + f * range);
+  const xStep = Math.max(1, Math.floor((n - 1) / 5));
+  const xTicks = Array.from({ length: 6 }, (_, i) => Math.min(i * xStep, n - 1));
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 180 }}>
+      {yTicks.map((v, i) => (
+        <g key={i}>
+          <line x1={PAD.left} y1={y(v)} x2={PAD.left + cW} y2={y(v)} stroke="#f0f0f0" strokeWidth="1" />
+          <text x={PAD.left - 6} y={y(v)} textAnchor="end" dominantBaseline="middle" fontSize="9" fill="#9ca3af">{fmt(v)}</text>
+        </g>
+      ))}
+      {xTicks.map((idx) => (
+        <text key={idx} x={x(idx)} y={H - 4} textAnchor="middle" fontSize="9" fill="#9ca3af">
+          {labels[idx]?.slice(0, 7) ?? ""}
+        </text>
+      ))}
+      <polyline points={poly(dca)}  fill="none" stroke="#3b82f6" strokeWidth="2" />
+      <polyline points={poly(lump)} fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="4,3" />
+      <g transform={`translate(${PAD.left + 8}, ${PAD.top + 8})`}>
+        <line x1="0" y1="0" x2="14" y2="0" stroke="#3b82f6" strokeWidth="2" />
+        <text x="18" y="0" dominantBaseline="middle" fontSize="9" fill="#6b7280">DCA mensual</text>
+        <line x1="80" y1="0" x2="94" y2="0" stroke="#22c55e" strokeWidth="2" strokeDasharray="4,3" />
+        <text x="98" y="0" dominantBaseline="middle" fontSize="9" fill="#6b7280">Inversión única</text>
+      </g>
+    </svg>
+  );
+}
+
+function DcaSimulatorSection() {
+  const [ticker,   setTicker]   = useState("SPY");
+  const [initial,  setInitial]  = useState(10000);
+  const [monthly,  setMonthly]  = useState(500);
+  const [years,    setYears]    = useState(10);
+  const [result,   setResult]   = useState<{ dca: number[]; lump: number[]; labels: string[]; totalContrib: number; totalLump: number } | null>(null);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState<string | null>(null);
+
+  const run = useCallback(async () => {
+    if (!ticker.trim()) return;
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const res  = await fetch(`/api/portfolio/dca-history?ticker=${encodeURIComponent(ticker.trim().toUpperCase())}&years=${years}`);
+      const data = await res.json() as { points?: DcaPoint[]; error?: string };
+      if (data.error || !data.points) { setError(data.error ?? "Sin datos"); return; }
+
+      const pts = data.points;
+      // DCA: initial at start, then monthly each month
+      let dcaShares = initial / pts[0].price;
+      const dcaVals: number[] = [initial];
+      let totalContrib = initial;
+
+      for (let i = 1; i < pts.length; i++) {
+        const shares = monthly / pts[i].price;
+        dcaShares += shares;
+        totalContrib += monthly;
+        dcaVals.push(dcaShares * pts[i].price);
+      }
+
+      // Lump sum: all initial + (years × 12 months × monthly) invested at start
+      const totalLumpContrib = initial + monthly * (pts.length - 1);
+      const lumpShares = totalLumpContrib / pts[0].price;
+      const lumpVals: number[] = pts.map((p) => lumpShares * p.price);
+
+      setResult({
+        dca: dcaVals,
+        lump: lumpVals,
+        labels: pts.map((p) => p.date),
+        totalContrib,
+        totalLump: totalLumpContrib,
+      });
+    } catch {
+      setError("Error al obtener datos históricos.");
+    } finally {
+      setLoading(false);
+    }
+  }, [ticker, initial, monthly, years]);
+
+  const fmtMoney = (v: number) => v.toLocaleString("es-ES", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  const inputClass = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900">¿Cuánto tendrías hoy?</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          Compara DCA mensual vs inversión única usando precios históricos reales de Yahoo Finance.
+        </p>
+      </div>
+
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Ticker</label>
+          <input
+            type="text"
+            value={ticker}
+            onChange={(e) => setTicker(e.target.value.toUpperCase())}
+            placeholder="SPY"
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Capital inicial (USD)</label>
+          <input type="number" min={0} value={initial || ""} onChange={(e) => setInitial(Number(e.target.value))} placeholder="10000" className={inputClass} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Aportación mensual (USD)</label>
+          <input type="number" min={0} value={monthly || ""} onChange={(e) => setMonthly(Number(e.target.value))} placeholder="500" className={inputClass} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Horizonte (años)</label>
+          <select value={years} onChange={(e) => setYears(Number(e.target.value))} className={inputClass}>
+            {[1, 2, 3, 5, 10].map((y) => <option key={y} value={y}>{y} año{y !== 1 ? "s" : ""}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <button
+        onClick={run}
+        disabled={loading}
+        className="px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+      >
+        {loading ? "Cargando histórico..." : "Calcular"}
+      </button>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {result && (
+        <div className="space-y-4">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <DcaChart dca={result.dca} lump={result.lump} labels={result.labels} />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <p className="text-xs text-gray-500 mb-1">DCA mensual</p>
+              <p className="text-base font-bold text-blue-600">{fmtMoney(result.dca[result.dca.length - 1])}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Aportado: {fmtMoney(result.totalContrib)}</p>
+              {result.totalContrib > 0 && (
+                <p className="text-xs font-medium mt-0.5" style={{ color: result.dca[result.dca.length - 1] >= result.totalContrib ? "#4ADE80" : "#F87171" }}>
+                  {((result.dca[result.dca.length - 1] / result.totalContrib - 1) * 100).toFixed(1)}% retorno total
+                </p>
+              )}
+            </div>
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+              <p className="text-xs text-gray-500 mb-1">Inversión única al inicio</p>
+              <p className="text-base font-bold text-green-600">{fmtMoney(result.lump[result.lump.length - 1])}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Invertido: {fmtMoney(result.totalLump)}</p>
+              {result.totalLump > 0 && (
+                <p className="text-xs font-medium mt-0.5" style={{ color: result.lump[result.lump.length - 1] >= result.totalLump ? "#4ADE80" : "#F87171" }}>
+                  {((result.lump[result.lump.length - 1] / result.totalLump - 1) * 100).toFixed(1)}% retorno total
+                </p>
+              )}
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-400 italic">
+            Basado en precios históricos ajustados por dividendos y splits de Yahoo Finance.
+            Los rendimientos pasados no garantizan resultados futuros. Solo con fines educativos.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SimulationPage() {
@@ -394,6 +581,10 @@ export default function SimulationPage() {
         <span className="text-gray-300">/</span>
         <h1 className="text-xl font-bold text-gray-900">Análisis cuantitativo</h1>
       </div>
+
+      <DcaSimulatorSection />
+
+      <hr className="border-gray-200" />
 
       <MonteCarloSection />
 

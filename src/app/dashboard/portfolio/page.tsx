@@ -6,6 +6,7 @@ import { getEquityCurve } from "@/services/portfolioSnapshotService";
 import EquityCurve from "@/components/dashboard/EquityCurve";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
+import PatrimonioChart from "@/components/dashboard/PatrimonioChart";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,8 @@ export default async function PortfolioPage() {
         <h1 className="text-xl font-bold text-gray-900">Rendimiento de cartera</h1>
         <Link href="/dashboard" className="text-xs text-blue-500 hover:underline">← Dashboard</Link>
       </div>
+
+      <PatrimonioChart />
 
       {!hasPositions ? (
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-10 text-center">
