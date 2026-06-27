@@ -66,9 +66,14 @@ async function safeFetch(url: string): Promise<unknown> {
   const timer = setTimeout(() => ctrl.abort(), 7000);
   try {
     const res = await fetch(url, { signal: ctrl.signal, next: { revalidate: 86400 } });
+    // Log URL (redact API key) and HTTP status for Vercel debugging
+    const sanitized = url.replace(/apikey=[^&]+/, "apikey=***").replace(/token=[^&]+/, "token=***");
+    console.log(`[financials-table] fetch ${sanitized} → ${res.status}`);
     if (!res.ok) return null;
     return await res.json();
-  } catch {
+  } catch (err) {
+    const sanitized = url.replace(/apikey=[^&]+/, "apikey=***").replace(/token=[^&]+/, "token=***");
+    console.log(`[financials-table] fetch ${sanitized} → ERROR: ${String(err)}`);
     return null;
   } finally {
     clearTimeout(timer);
@@ -142,7 +147,73 @@ async function fetchFinnhubFinancials(ticker: string): Promise<Map<number, Parti
   return result;
 }
 
-// ── FMP forward estimates ────────────────────────────────────────────────────
+// ── FMP historical actuals (quarterly income statement → aggregated annual) ────
+
+interface FmpIncomeItem {
+  date:                        string; // "2024-03-31"
+  revenue:                     number | null;
+  ebitda:                      number | null;
+  netIncome:                   number | null;
+  eps:                         number | null;
+  operatingIncome:             number | null;
+  depreciationAndAmortization: number | null;
+}
+
+async function fetchFmpActuals(ticker: string): Promise<Map<number, Partial<FinancialRow>>> {
+  const key = fmpKey();
+  if (!key) return new Map();
+
+  const url = `https://financialmodelingprep.com/stable/income-statement?symbol=${encodeURIComponent(ticker)}&period=quarter&limit=8&apikey=${key}`;
+  const raw = await safeFetch(url) as FmpIncomeItem[] | null;
+  if (!Array.isArray(raw) || raw.length === 0) return new Map();
+
+  // Group quarters by calendar year (year of the period end date)
+  const byYear = new Map<number, FmpIncomeItem[]>();
+  for (const item of raw) {
+    const yr = new Date(item.date).getFullYear();
+    if (!byYear.has(yr)) byYear.set(yr, []);
+    byYear.get(yr)!.push(item);
+  }
+
+  const n = (v: number | null | undefined): number | null =>
+    typeof v === "number" && isFinite(v) ? v : null;
+
+  const sumQ = (quarters: FmpIncomeItem[], field: keyof FmpIncomeItem): number | null => {
+    const vals = quarters.map((q) => n(q[field] as number | null)).filter((v): v is number => v != null);
+    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : null;
+  };
+
+  const result = new Map<number, Partial<FinancialRow>>();
+
+  for (const [yr, quarters] of Array.from(byYear.entries())) {
+    const revenue   = sumQ(quarters, "revenue");
+    const netIncome = sumQ(quarters, "netIncome");
+    const eps       = sumQ(quarters, "eps");
+    const opIncome  = sumQ(quarters, "operatingIncome");
+    const da        = sumQ(quarters, "depreciationAndAmortization");
+
+    // Prefer explicit ebitda; compute from operatingIncome + D&A if null/zero
+    const rawEbitda = sumQ(quarters, "ebitda");
+    const ebitda    = rawEbitda && rawEbitda > 0 ? rawEbitda : (opIncome != null && da != null ? opIncome + da : null);
+
+    result.set(yr, {
+      revenue,
+      ebitda,
+      ebit:       opIncome,
+      netIncome,
+      eps,
+      grossProfit: null, // not in FMP income-statement endpoint
+      grossMargin:  null,
+      ebitMargin:   revenue && opIncome  ? (opIncome  / revenue) * 100 : null,
+      ebitdaMargin: revenue && ebitda    ? (ebitda    / revenue) * 100 : null,
+      netMargin:    revenue && netIncome ? (netIncome / revenue) * 100 : null,
+    });
+  }
+
+  return result;
+}
+
+// ── FMP forward estimates ─────────────────────────────────────────────────────
 
 interface FmpEstimate {
   date:            string; // "2025-12-31"
@@ -158,7 +229,8 @@ async function fetchFmpEstimates(ticker: string): Promise<Map<number, Partial<Fi
   const key = fmpKey();
   if (!key) return new Map();
 
-  const url = `https://financialmodelingprep.com/api/v3/analyst-estimates/${encodeURIComponent(ticker)}?apikey=${key}`;
+  // Migrated: /api/v3/ → /stable/ with symbol= query param
+  const url = `https://financialmodelingprep.com/stable/analyst-estimates?symbol=${encodeURIComponent(ticker)}&apikey=${key}`;
   const raw = await safeFetch(url) as FmpEstimate[] | null;
   if (!Array.isArray(raw)) return new Map();
 
@@ -258,17 +330,46 @@ export async function GET(request: Request) {
   const ticker = (searchParams.get("ticker") ?? "").toUpperCase();
   if (!ticker) return NextResponse.json({ error: "ticker required" }, { status: 400 });
 
-  const [histMap, fwdMap, evData, nextEarnings] = await Promise.allSettled([
+  const [histMap, fmpActMap, fwdMap, evData, nextEarnings] = await Promise.allSettled([
     fetchFinnhubFinancials(ticker),
+    fetchFmpActuals(ticker),
     fetchFmpEstimates(ticker),
     fetchEvMetrics(ticker),
     fetchNextEarningsDate(ticker),
   ]);
 
-  const hist       = histMap.status === "fulfilled" ? histMap.value : new Map<number, Partial<FinancialRow>>();
-  const fwd        = fwdMap.status  === "fulfilled" ? fwdMap.value  : new Map<number, Partial<FinancialRow>>();
-  const ev         = evData.status  === "fulfilled" ? evData.value  : { ev: null, marketCap: null, trailingPE: null, forwardPE: null };
+  const finnhubHist = histMap.status   === "fulfilled" ? histMap.value   : new Map<number, Partial<FinancialRow>>();
+  const fmpAct      = fmpActMap.status === "fulfilled" ? fmpActMap.value : new Map<number, Partial<FinancialRow>>();
+  const fwd         = fwdMap.status    === "fulfilled" ? fwdMap.value    : new Map<number, Partial<FinancialRow>>();
+  const ev          = evData.status    === "fulfilled" ? evData.value    : { ev: null, marketCap: null, trailingPE: null, forwardPE: null };
   const earningsDate = nextEarnings.status === "fulfilled" ? nextEarnings.value : null;
+
+  // Merge Finnhub (annual, has grossProfit) + FMP actuals (quarterly→annual, has explicit EBITDA).
+  // FMP values take priority for ebitda/netIncome/eps where non-null; Finnhub kept for grossProfit.
+  const hist = new Map<number, Partial<FinancialRow>>();
+  const allYears = new Set<number>([...Array.from(finnhubHist.keys()), ...Array.from(fmpAct.keys())]);
+  for (const yr of Array.from(allYears)) {
+    const fh  = finnhubHist.get(yr) ?? {};
+    const fmp = fmpAct.get(yr) ?? {};
+    const revenue   = fmp.revenue    ?? fh.revenue    ?? null;
+    const ebit      = fmp.ebit       ?? fh.ebit       ?? null;
+    const ebitda    = fmp.ebitda     ?? fh.ebitda     ?? null;
+    const netIncome = fmp.netIncome  ?? fh.netIncome  ?? null;
+    const eps       = fmp.eps        ?? fh.eps        ?? null;
+    const gross     = fh.grossProfit ?? null; // only Finnhub provides this
+    hist.set(yr, {
+      revenue,
+      grossProfit:  gross,
+      ebit,
+      ebitda,
+      netIncome,
+      eps,
+      grossMargin:  revenue && gross     ? (gross     / revenue) * 100 : null,
+      ebitMargin:   revenue && ebit      ? (ebit      / revenue) * 100 : null,
+      ebitdaMargin: revenue && ebitda    ? (ebitda    / revenue) * 100 : null,
+      netMargin:    revenue && netIncome ? (netIncome / revenue) * 100 : null,
+    });
+  }
 
   const allRows: FinancialRow[] = [];
 
