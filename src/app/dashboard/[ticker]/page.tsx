@@ -8,6 +8,7 @@ import { HORIZON_LABELS } from "@/types/models";
 import type { InvestmentHorizon } from "@/types/models";
 import PriceChart from "@/components/dashboard/PriceChart";
 import FinancialsTable from "@/components/dashboard/FinancialsTable";
+import EarningsChart from "@/components/dashboard/EarningsChart";
 import {
   fetchStockProfile,
   fetchStockMetrics,
@@ -90,7 +91,30 @@ function computeRiskMetrics(closes: number[], timestamps: number[]) {
   const years = (timestamps[timestamps.length - 1] - timestamps[0]) / (365.25 * 24 * 3600);
   const annualized = years > 0 ? (Math.pow(1 + totalReturn, 1 / years) - 1) * 100 : null;
 
-  return { maxDrawdownPct: maxDD * 100, bestYear, worstYear, pctPositiveMonths, annualizedPct: annualized };
+  // Volatilidad anualizada
+  const dailyRets: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i - 1] > 0) dailyRets.push(Math.log(closes[i] / closes[i - 1]));
+  }
+  const meanRet = dailyRets.reduce((s, v) => s + v, 0) / (dailyRets.length || 1);
+  const variance = dailyRets.reduce((s, v) => s + (v - meanRet) ** 2, 0) / (dailyRets.length || 1);
+  const volatilityAnnualized = Math.sqrt(variance) * Math.sqrt(252) * 100;
+
+  // Sharpe Ratio (rf = 2%)
+  const sharpeRatio =
+    annualized != null && volatilityAnnualized > 0
+      ? (annualized - 2) / volatilityAnnualized
+      : null;
+
+  return {
+    maxDrawdownPct: maxDD * 100,
+    bestYear,
+    worstYear,
+    pctPositiveMonths,
+    annualizedPct: annualized,
+    volatilityAnnualized,
+    sharpeRatio,
+  };
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
@@ -166,9 +190,44 @@ export default async function TickerDetailPage({ params }: Props) {
             Rentabilidad y riesgo histórica
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <RiskCell label="Caída máxima (drawdown)"
+            {/* Volatilidad — semáforo: verde <20%, amarillo 20-40%, rojo >40% */}
+            <RiskCell
+              label="Volatilidad anualizada"
+              value={`${riskMetrics.volatilityAnnualized.toFixed(1)}%`}
+              valueClass={
+                riskMetrics.volatilityAnnualized < 20
+                  ? "text-green-600 font-bold"
+                  : riskMetrics.volatilityAnnualized < 40
+                  ? "text-yellow-600 font-bold"
+                  : "text-red-600 font-bold"
+              }
+            />
+            {/* Max Drawdown — semáforo: verde <15%, amarillo 15-30%, rojo >30% */}
+            <RiskCell
+              label="Caída máxima (drawdown)"
               value={`-${fmt(riskMetrics.maxDrawdownPct)}%`}
-              valueClass="text-red-600 font-bold" />
+              valueClass={
+                riskMetrics.maxDrawdownPct < 15
+                  ? "text-green-600 font-bold"
+                  : riskMetrics.maxDrawdownPct < 30
+                  ? "text-yellow-600 font-bold"
+                  : "text-red-600 font-bold"
+              }
+            />
+            {/* Sharpe — semáforo: verde >1, amarillo 0.5-1, rojo <0.5 */}
+            {riskMetrics.sharpeRatio != null && (
+              <RiskCell
+                label="Sharpe Ratio (rf=2%)"
+                value={riskMetrics.sharpeRatio.toFixed(2)}
+                valueClass={
+                  riskMetrics.sharpeRatio > 1
+                    ? "text-green-600 font-bold"
+                    : riskMetrics.sharpeRatio >= 0.5
+                    ? "text-yellow-600 font-bold"
+                    : "text-red-600 font-bold"
+                }
+              />
+            )}
             <RiskCell label="Mejor año"
               value={riskMetrics.bestYear ? `${riskMetrics.bestYear.year}: +${riskMetrics.bestYear.pct.toFixed(1)}%` : "—"}
               valueClass="text-green-600 font-bold" />
@@ -186,7 +245,7 @@ export default async function TickerDetailPage({ params }: Props) {
                 valueClass="text-gray-800 font-bold" />
             )}
             {met?.beta != null && (
-              <RiskCell label="Beta"
+              <RiskCell label="Beta (vs mercado)"
                 value={fmt(met.beta)}
                 valueClass="text-gray-800 font-bold" />
             )}
@@ -269,6 +328,9 @@ export default async function TickerDetailPage({ params }: Props) {
 
       {/* Actuals & Consensus Estimates table */}
       <FinancialsTable ticker={ticker} />
+
+      {/* Revenue / EBITDA / EPS chart */}
+      <EarningsChart ticker={ticker} />
 
       {/* Price history chart */}
       {h.length === 0 ? (
