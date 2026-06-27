@@ -9,6 +9,8 @@ import type { InvestmentHorizon } from "@/types/models";
 import PriceChart from "@/components/dashboard/PriceChart";
 import FinancialsTable from "@/components/dashboard/FinancialsTable";
 import EarningsChart from "@/components/dashboard/EarningsChart";
+import PeerComparison from "@/components/dashboard/PeerComparison";
+import { resolveSector } from "@/lib/sectorUtils";
 import {
   fetchStockProfile,
   fetchStockMetrics,
@@ -17,6 +19,11 @@ import {
 import { fetchYahooCandles } from "@/lib/yahooFinanceClient";
 
 export const dynamic = "force-dynamic";
+
+const NON_EQUITY_SECTORS = new Set([
+  "ETF EE.UU.", "ETF Europa", "ETF Global", "Renta Fija",
+  "Cripto", "Materias Primas", "Índice",
+]);
 
 const SCENARIO_COLORS: Record<string, string> = {
   Positivo: "text-green-700 bg-green-50 border-green-200",
@@ -331,6 +338,11 @@ export default async function TickerDetailPage({ params }: Props) {
 
       {/* Revenue / EBITDA / EPS chart */}
       <EarningsChart ticker={ticker} />
+
+      {/* Peer comparison — not shown for ETFs, crypto, indices */}
+      {!NON_EQUITY_SECTORS.has(stock.sector ?? resolveSector(stock.ticker) ?? "") && (
+        <PeerComparison ticker={ticker} />
+      )}
 
       {/* Price history chart */}
       {h.length === 0 ? (
