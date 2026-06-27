@@ -17,6 +17,7 @@ import CorrelationMatrix from "@/components/dashboard/CorrelationMatrix";
 import TaxHarvestingPanel from "@/components/dashboard/TaxHarvestingPanel";
 import AssetAllocation from "@/components/dashboard/AssetAllocation";
 import DeepAnalysisPanel from "@/components/dashboard/DeepAnalysisPanel";
+import FutureProjection from "@/components/dashboard/FutureProjection";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +101,8 @@ export default async function DashboardPage() {
       <PortfolioSummary stocks={stocks} realizedPnL={portfolioMetrics.totalRealizedPnL} />
 
       <AssetAllocation stocks={openStocks} />
+
+      <FutureProjection stocks={openStocks} />
 
       <PortfolioBenchmark stocks={stocks} />
 
