@@ -50,10 +50,6 @@ export interface FinancialsTableData {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function fmpKey(): string | null {
-  return process.env.FMP_API_KEY ?? null;
-}
-
 function finnhubKey(): string {
   const k = process.env.FINNHUB_API_KEY;
   if (!k) throw new Error("FINNHUB_API_KEY missing");
@@ -61,12 +57,15 @@ function finnhubKey(): string {
 }
 
 // Safely fetch with 7s timeout (leave margin for Vercel Hobby 10s limit)
-async function safeFetch(url: string): Promise<unknown> {
+async function safeFetch(url: string, init?: { headers?: Record<string, string> }): Promise<unknown> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 7000);
   try {
-    const res = await fetch(url, { signal: ctrl.signal, next: { revalidate: 86400 } });
-    // Log URL (redact API key) and HTTP status for Vercel debugging
+    const res = await fetch(url, {
+      signal: ctrl.signal,
+      next: { revalidate: 86400 },
+      ...(init?.headers ? { headers: init.headers } : {}),
+    });
     const sanitized = url.replace(/apikey=[^&]+/, "apikey=***").replace(/token=[^&]+/, "token=***");
     console.log(`[financials-table] fetch ${sanitized} → ${res.status}`);
     if (!res.ok) return null;
@@ -116,8 +115,8 @@ async function fetchFinnhubFinancials(ticker: string): Promise<Map<number, Parti
   const daByYear = new Map<number, number>(); // D&A from cash flow
   for (const stmt of cfData?.financials ?? []) {
     const yr = new Date(stmt.period).getFullYear();
-    const items = stmt.report.cf ?? [];
-    const da = pickFinnhub(items, "depreciationAmortization", "depreciationAndAmortization");
+    const cfItems = stmt.report.cf ?? [];
+    const da = pickFinnhub(cfItems, "depreciationAmortization", "depreciationAndAmortization");
     if (da != null) daByYear.set(yr, Math.abs(da));
   }
 
@@ -147,71 +146,104 @@ async function fetchFinnhubFinancials(ticker: string): Promise<Map<number, Parti
   return result;
 }
 
-// ── FMP historical actuals (quarterly income statement → aggregated annual) ────
+// ── Yahoo Finance historical financials (quarterly → aggregated annual) ───────
 
-interface FmpIncomeItem {
-  date:                        string; // "2024-03-31"
-  revenue:                     number | null;
-  ebitda:                      number | null;
-  netIncome:                   number | null;
-  eps:                         number | null;
-  operatingIncome:             number | null;
-  depreciationAndAmortization: number | null;
+interface YahooRV { raw: number }
+
+interface YahooIncomeStmt {
+  endDate:          YahooRV;
+  totalRevenue?:    YahooRV;
+  ebitda?:          YahooRV;
+  netIncome?:       YahooRV;
+  basicEPS?:        YahooRV;
+  operatingIncome?: YahooRV;
 }
 
-async function fetchFmpActuals(ticker: string): Promise<Map<number, Partial<FinancialRow>>> {
-  const key = fmpKey();
-  if (!key) return new Map();
+interface YahooCashflowStmt {
+  endDate:       YahooRV;
+  depreciation?: YahooRV;
+}
 
-  const url = `https://financialmodelingprep.com/stable/income-statement?symbol=${encodeURIComponent(ticker)}&period=quarter&limit=8&apikey=${key}`;
-  const raw = await safeFetch(url);
-  // /stable/income-statement returns a top-level array (not wrapped in an object)
-  const items = Array.isArray(raw) ? (raw as FmpIncomeItem[]) : [];
-  console.log("[financials-table] FMP items count:", items.length);
-  if (items.length > 0) console.log("[financials-table] sample item:", JSON.stringify(items[0]));
-  if (items.length === 0) return new Map();
+interface YahooQuoteSummaryData {
+  quoteSummary: {
+    result: Array<{
+      incomeStatementHistoryQuarterly:   { incomeStatementHistory: YahooIncomeStmt[] };
+      cashflowStatementHistoryQuarterly: { cashflowStatements:     YahooCashflowStmt[] };
+    }> | null;
+  };
+}
 
-  // FMP returns absolute USD values; divide by 1_000_000 to match the rest of the
-  // codebase which works in $M (same unit as Finnhub metric endpoint for EV/marketCap).
+async function fetchYahooFinancials(ticker: string): Promise<Map<number, Partial<FinancialRow>>> {
+  const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=incomeStatementHistoryQuarterly,cashflowStatementHistoryQuarterly`;
+  const data = await safeFetch(url, { headers: { "User-Agent": "Mozilla/5.0" } }) as YahooQuoteSummaryData | null;
+
+  const qsr       = data?.quoteSummary?.result?.[0];
+  const incomeQ   = qsr?.incomeStatementHistoryQuarterly?.incomeStatementHistory   ?? [];
+  const cashflowQ = qsr?.cashflowStatementHistoryQuarterly?.cashflowStatements     ?? [];
+
+  console.log("[financials-table] Yahoo items count:", incomeQ.length);
+  if (incomeQ.length > 0) console.log("[financials-table] sample:", JSON.stringify(incomeQ[0]));
+  if (incomeQ.length === 0) return new Map();
+
+  // Extract numeric value from Yahoo's { raw: number } wrapper
+  const rv = (obj: YahooRV | undefined): number | null =>
+    obj != null && typeof obj.raw === "number" && isFinite(obj.raw) ? obj.raw : null;
+
+  // Yahoo returns absolute USD; divide by 1_000_000 to match codebase unit ($M)
   const toM = (v: number | null): number | null => (v != null ? v / 1_000_000 : null);
 
-  // Group quarters by calendar year (year of the period end date)
-  const byYear = new Map<number, FmpIncomeItem[]>();
-  for (const item of items) {
-    const yr = new Date(item.date).getFullYear();
-    if (!byYear.has(yr)) byYear.set(yr, []);
-    byYear.get(yr)!.push(item);
+  // Build D&A lookup: quarter endDate timestamp → depreciation (absolute USD)
+  const daMap = new Map<number, number>();
+  for (const cf of cashflowQ) {
+    const ts = rv(cf.endDate);
+    const da = rv(cf.depreciation);
+    if (ts != null && da != null) daMap.set(ts, Math.abs(da));
   }
 
-  const n = (v: number | null | undefined): number | null =>
-    typeof v === "number" && isFinite(v) ? v : null;
-
-  const sumQ = (quarters: FmpIncomeItem[], field: keyof FmpIncomeItem): number | null => {
-    const vals = quarters.map((q) => n(q[field] as number | null)).filter((v): v is number => v != null);
-    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : null;
-  };
+  // Group quarterly income statements by calendar year
+  const byYear = new Map<number, YahooIncomeStmt[]>();
+  for (const stmt of incomeQ) {
+    const ts = rv(stmt.endDate);
+    if (ts == null) continue;
+    const yr = new Date(ts * 1000).getFullYear();
+    if (!byYear.has(yr)) byYear.set(yr, []);
+    byYear.get(yr)!.push(stmt);
+  }
 
   const result = new Map<number, Partial<FinancialRow>>();
 
   for (const [yr, quarters] of Array.from(byYear.entries())) {
-    // Sum quarterly absolute USD values, then convert to $M
-    const revenue   = toM(sumQ(quarters, "revenue"));
-    const netIncome = toM(sumQ(quarters, "netIncome"));
-    const eps       = sumQ(quarters, "eps"); // per-share: no unit scaling
-    const opIncome  = toM(sumQ(quarters, "operatingIncome"));
-    const da        = toM(sumQ(quarters, "depreciationAndAmortization"));
+    const sumAbs = (field: keyof YahooIncomeStmt): number | null => {
+      const vals = quarters
+        .map((q) => rv(q[field] as YahooRV | undefined))
+        .filter((v): v is number => v != null);
+      return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : null;
+    };
 
-    // Prefer explicit ebitda; compute from operatingIncome + D&A if null/zero
-    const rawEbitda = toM(sumQ(quarters, "ebitda"));
-    const ebitda    = rawEbitda && rawEbitda > 0 ? rawEbitda : (opIncome != null && da != null ? opIncome + da : null);
+    const revenue   = toM(sumAbs("totalRevenue"));
+    const netIncome = toM(sumAbs("netIncome"));
+    const eps       = sumAbs("basicEPS"); // per-share: no unit scaling
+    const opIncome  = toM(sumAbs("operatingIncome"));
+
+    // Sum D&A matching each quarter's timestamp from the cashflow map
+    const daTotalAbs = quarters.reduce((acc, q) => {
+      const ts = rv(q.endDate);
+      return acc + (ts != null ? (daMap.get(ts) ?? 0) : 0);
+    }, 0);
+    const da = daTotalAbs > 0 ? daTotalAbs / 1_000_000 : null;
+
+    // Prefer explicit EBITDA; fall back to operatingIncome + D&A
+    const rawEbitda = toM(sumAbs("ebitda"));
+    const ebitda = rawEbitda && rawEbitda > 0 ? rawEbitda
+      : opIncome != null && da != null ? opIncome + da : null;
 
     result.set(yr, {
       revenue,
       ebitda,
-      ebit:       opIncome,
+      ebit:        opIncome,
       netIncome,
       eps,
-      grossProfit: null, // not in FMP income-statement endpoint
+      grossProfit: null,
       grossMargin:  null,
       ebitMargin:   revenue && opIncome  ? (opIncome  / revenue) * 100 : null,
       ebitdaMargin: revenue && ebitda    ? (ebitda    / revenue) * 100 : null,
@@ -219,50 +251,6 @@ async function fetchFmpActuals(ticker: string): Promise<Map<number, Partial<Fina
     });
   }
 
-  return result;
-}
-
-// ── FMP forward estimates ─────────────────────────────────────────────────────
-
-interface FmpEstimate {
-  date:            string; // "2025-12-31"
-  revenueAvg:      number | null;
-  ebitdaAvg:       number | null;
-  netIncomeAvg:    number | null;
-  epsAvg:          number | null;
-  revenueHigh?:    number | null;
-  revenueLow?:     number | null;
-}
-
-async function fetchFmpEstimates(ticker: string): Promise<Map<number, Partial<FinancialRow>>> {
-  const key = fmpKey();
-  if (!key) return new Map();
-
-  // Migrated: /api/v3/ → /stable/ with symbol= query param
-  const url = `https://financialmodelingprep.com/stable/analyst-estimates?symbol=${encodeURIComponent(ticker)}&apikey=${key}`;
-  const raw = await safeFetch(url) as FmpEstimate[] | null;
-  if (!Array.isArray(raw)) return new Map();
-
-  const result = new Map<number, Partial<FinancialRow>>();
-  const now = new Date().getFullYear();
-
-  for (const item of raw) {
-    const yr = new Date(item.date).getFullYear();
-    // Only include future/current years as estimates
-    if (yr < now) continue;
-    result.set(yr, {
-      revenue:     item.revenueAvg    ?? null,
-      ebitda:      item.ebitdaAvg     ?? null,
-      netIncome:   item.netIncomeAvg  ?? null,
-      eps:         item.epsAvg        ?? null,
-      grossProfit: null,
-      ebit:        null,
-      grossMargin:  null,
-      ebitMargin:   null,
-      ebitdaMargin: null,
-      netMargin:    null,
-    });
-  }
   return result;
 }
 
@@ -316,15 +304,15 @@ function addYoY(rows: FinancialRow[]): FinancialRow[] {
 // ── Valuation rows ────────────────────────────────────────────────────────────
 
 function buildValuations(rows: FinancialRow[], ev: number | null, marketCap: number | null): ValuationRow[] {
-  // Finnhub metric returns ev/marketCap in $M; FinancialRow values are also in $M after
-  // FMP unit conversion, so ratios divide same-unit values directly (no scaling needed).
+  // Finnhub metric returns ev/marketCap in $M; FinancialRow values are also in $M,
+  // so ratios divide same-unit values directly (no scaling needed).
   return rows.map((r) => ({
     year:      r.year,
     period:    r.period,
-    evEbitda:  ev         && r.ebitda    && r.ebitda    > 0 ? ev         / r.ebitda    : null,
-    evEbit:    ev         && r.ebit      && r.ebit      > 0 ? ev         / r.ebit      : null,
-    peForward: marketCap  && r.netIncome && r.netIncome > 0 ? marketCap  / r.netIncome : null,
-    psForward: marketCap  && r.revenue   && r.revenue   > 0 ? marketCap  / r.revenue   : null,
+    evEbitda:  ev        && r.ebitda    && r.ebitda    > 0 ? ev        / r.ebitda    : null,
+    evEbit:    ev        && r.ebit      && r.ebit      > 0 ? ev        / r.ebit      : null,
+    peForward: marketCap && r.netIncome && r.netIncome > 0 ? marketCap / r.netIncome : null,
+    psForward: marketCap && r.revenue   && r.revenue   > 0 ? marketCap / r.revenue   : null,
   }));
 }
 
@@ -338,33 +326,31 @@ export async function GET(request: Request) {
   const ticker = (searchParams.get("ticker") ?? "").toUpperCase();
   if (!ticker) return NextResponse.json({ error: "ticker required" }, { status: 400 });
 
-  const [histMap, fmpActMap, fwdMap, evData, nextEarnings] = await Promise.allSettled([
+  const [histMap, yahooActMap, evData, nextEarnings] = await Promise.allSettled([
     fetchFinnhubFinancials(ticker),
-    fetchFmpActuals(ticker),
-    fetchFmpEstimates(ticker),
+    fetchYahooFinancials(ticker),
     fetchEvMetrics(ticker),
     fetchNextEarningsDate(ticker),
   ]);
 
-  const finnhubHist = histMap.status   === "fulfilled" ? histMap.value   : new Map<number, Partial<FinancialRow>>();
-  const fmpAct      = fmpActMap.status === "fulfilled" ? fmpActMap.value : new Map<number, Partial<FinancialRow>>();
-  const fwd         = fwdMap.status    === "fulfilled" ? fwdMap.value    : new Map<number, Partial<FinancialRow>>();
-  const ev          = evData.status    === "fulfilled" ? evData.value    : { ev: null, marketCap: null, trailingPE: null, forwardPE: null };
+  const finnhubHist = histMap.status     === "fulfilled" ? histMap.value     : new Map<number, Partial<FinancialRow>>();
+  const yahooAct    = yahooActMap.status === "fulfilled" ? yahooActMap.value : new Map<number, Partial<FinancialRow>>();
+  const ev          = evData.status      === "fulfilled" ? evData.value      : { ev: null, marketCap: null, trailingPE: null, forwardPE: null };
   const earningsDate = nextEarnings.status === "fulfilled" ? nextEarnings.value : null;
 
-  // Merge Finnhub (annual, has grossProfit) + FMP actuals (quarterly→annual, has explicit EBITDA).
-  // FMP values take priority for ebitda/netIncome/eps where non-null; Finnhub kept for grossProfit.
+  // Merge Finnhub (annual, has grossProfit) + Yahoo (quarterly→annual).
+  // Yahoo values take priority for ebitda/netIncome/eps; Finnhub kept for grossProfit.
   const hist = new Map<number, Partial<FinancialRow>>();
-  const allYears = new Set<number>([...Array.from(finnhubHist.keys()), ...Array.from(fmpAct.keys())]);
+  const allYears = new Set<number>([...Array.from(finnhubHist.keys()), ...Array.from(yahooAct.keys())]);
   for (const yr of Array.from(allYears)) {
-    const fh  = finnhubHist.get(yr) ?? {};
-    const fmp = fmpAct.get(yr) ?? {};
-    const revenue   = fmp.revenue    ?? fh.revenue    ?? null;
-    const ebit      = fmp.ebit       ?? fh.ebit       ?? null;
-    const ebitda    = fmp.ebitda     ?? fh.ebitda     ?? null;
-    const netIncome = fmp.netIncome  ?? fh.netIncome  ?? null;
-    const eps       = fmp.eps        ?? fh.eps        ?? null;
-    const gross     = fh.grossProfit ?? null; // only Finnhub provides this
+    const fh    = finnhubHist.get(yr) ?? {};
+    const yahoo = yahooAct.get(yr)    ?? {};
+    const revenue   = yahoo.revenue    ?? fh.revenue    ?? null;
+    const ebit      = yahoo.ebit       ?? fh.ebit       ?? null;
+    const ebitda    = yahoo.ebitda     ?? fh.ebitda     ?? null;
+    const netIncome = yahoo.netIncome  ?? fh.netIncome  ?? null;
+    const eps       = yahoo.eps        ?? fh.eps        ?? null;
+    const gross     = fh.grossProfit   ?? null; // only Finnhub provides this
     hist.set(yr, {
       revenue,
       grossProfit:  gross,
@@ -403,38 +389,8 @@ export async function GET(request: Request) {
     });
   }
 
-  for (const [yr, data] of Array.from(fwd.entries())) {
-    if (!hist.has(yr)) {
-      const rev = data.revenue ?? null;
-      const ebitda = data.ebitda ?? null;
-      const ni = data.netIncome ?? null;
-      allRows.push({
-        year: yr,
-        period: "E",
-        revenue:     rev,
-        grossProfit: null,
-        ebit:        null,
-        ebitda:      ebitda,
-        netIncome:   ni,
-        eps:         data.eps ?? null,
-        grossMargin:  null,
-        ebitMargin:   null,
-        ebitdaMargin: rev && ebitda ? (ebitda / rev) * 100 : null,
-        netMargin:    rev && ni     ? (ni / rev) * 100     : null,
-        revenueYoY:   null,
-        ebitYoY:      null,
-        ebitdaYoY:    null,
-        netIncomeYoY: null,
-        epsYoY:       null,
-      });
-    }
-  }
-
-  // Keep last 4 actuals + up to 3 estimates
-  const actuals   = allRows.filter((r) => r.period === "A").sort((a, b) => a.year - b.year).slice(-4);
-  const estimates = allRows.filter((r) => r.period === "E").sort((a, b) => a.year - b.year).slice(0, 3);
-  const combined  = addYoY([...actuals, ...estimates]);
-
+  // Keep last 4 actuals
+  const combined = addYoY(allRows.sort((a, b) => a.year - b.year).slice(-4));
   const valuations = buildValuations(combined, ev.ev, ev.marketCap);
 
   const payload: FinancialsTableData = {
