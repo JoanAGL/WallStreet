@@ -164,12 +164,20 @@ async function fetchFmpActuals(ticker: string): Promise<Map<number, Partial<Fina
   if (!key) return new Map();
 
   const url = `https://financialmodelingprep.com/stable/income-statement?symbol=${encodeURIComponent(ticker)}&period=quarter&limit=8&apikey=${key}`;
-  const raw = await safeFetch(url) as FmpIncomeItem[] | null;
-  if (!Array.isArray(raw) || raw.length === 0) return new Map();
+  const raw = await safeFetch(url);
+  // /stable/income-statement returns a top-level array (not wrapped in an object)
+  const items = Array.isArray(raw) ? (raw as FmpIncomeItem[]) : [];
+  console.log("[financials-table] FMP items count:", items.length);
+  if (items.length > 0) console.log("[financials-table] sample item:", JSON.stringify(items[0]));
+  if (items.length === 0) return new Map();
+
+  // FMP returns absolute USD values; divide by 1_000_000 to match the rest of the
+  // codebase which works in $M (same unit as Finnhub metric endpoint for EV/marketCap).
+  const toM = (v: number | null): number | null => (v != null ? v / 1_000_000 : null);
 
   // Group quarters by calendar year (year of the period end date)
   const byYear = new Map<number, FmpIncomeItem[]>();
-  for (const item of raw) {
+  for (const item of items) {
     const yr = new Date(item.date).getFullYear();
     if (!byYear.has(yr)) byYear.set(yr, []);
     byYear.get(yr)!.push(item);
@@ -186,14 +194,15 @@ async function fetchFmpActuals(ticker: string): Promise<Map<number, Partial<Fina
   const result = new Map<number, Partial<FinancialRow>>();
 
   for (const [yr, quarters] of Array.from(byYear.entries())) {
-    const revenue   = sumQ(quarters, "revenue");
-    const netIncome = sumQ(quarters, "netIncome");
-    const eps       = sumQ(quarters, "eps");
-    const opIncome  = sumQ(quarters, "operatingIncome");
-    const da        = sumQ(quarters, "depreciationAndAmortization");
+    // Sum quarterly absolute USD values, then convert to $M
+    const revenue   = toM(sumQ(quarters, "revenue"));
+    const netIncome = toM(sumQ(quarters, "netIncome"));
+    const eps       = sumQ(quarters, "eps"); // per-share: no unit scaling
+    const opIncome  = toM(sumQ(quarters, "operatingIncome"));
+    const da        = toM(sumQ(quarters, "depreciationAndAmortization"));
 
     // Prefer explicit ebitda; compute from operatingIncome + D&A if null/zero
-    const rawEbitda = sumQ(quarters, "ebitda");
+    const rawEbitda = toM(sumQ(quarters, "ebitda"));
     const ebitda    = rawEbitda && rawEbitda > 0 ? rawEbitda : (opIncome != null && da != null ? opIncome + da : null);
 
     result.set(yr, {
@@ -307,16 +316,15 @@ function addYoY(rows: FinancialRow[]): FinancialRow[] {
 // ── Valuation rows ────────────────────────────────────────────────────────────
 
 function buildValuations(rows: FinancialRow[], ev: number | null, marketCap: number | null): ValuationRow[] {
-  const evM = ev != null ? ev * 1e6 : null;
-  const mcM = marketCap != null ? marketCap * 1e6 : null;
-
+  // Finnhub metric returns ev/marketCap in $M; FinancialRow values are also in $M after
+  // FMP unit conversion, so ratios divide same-unit values directly (no scaling needed).
   return rows.map((r) => ({
     year:      r.year,
     period:    r.period,
-    evEbitda:  evM && r.ebitda && r.ebitda > 0 ? evM / r.ebitda : null,
-    evEbit:    evM && r.ebit   && r.ebit   > 0 ? evM / r.ebit   : null,
-    peForward: mcM && r.netIncome && r.netIncome > 0 ? mcM / r.netIncome : null,
-    psForward: mcM && r.revenue   && r.revenue   > 0 ? mcM / r.revenue   : null,
+    evEbitda:  ev         && r.ebitda    && r.ebitda    > 0 ? ev         / r.ebitda    : null,
+    evEbit:    ev         && r.ebit      && r.ebit      > 0 ? ev         / r.ebit      : null,
+    peForward: marketCap  && r.netIncome && r.netIncome > 0 ? marketCap  / r.netIncome : null,
+    psForward: marketCap  && r.revenue   && r.revenue   > 0 ? marketCap  / r.revenue   : null,
   }));
 }
 
