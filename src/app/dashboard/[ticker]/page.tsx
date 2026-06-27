@@ -7,6 +7,7 @@ import { getStockHistory } from "@/repositories/analysisHistoryRepository";
 import { HORIZON_LABELS } from "@/types/models";
 import type { InvestmentHorizon } from "@/types/models";
 import PriceChart from "@/components/dashboard/PriceChart";
+import FinancialsTable from "@/components/dashboard/FinancialsTable";
 import {
   fetchStockProfile,
   fetchStockMetrics,
@@ -265,6 +266,9 @@ export default async function TickerDetailPage({ params }: Props) {
           </div>
         </div>
       )}
+
+      {/* Actuals & Consensus Estimates table */}
+      <FinancialsTable ticker={ticker} />
 
       {/* Price history chart */}
       {h.length === 0 ? (
