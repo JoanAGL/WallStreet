@@ -2,6 +2,7 @@ import type { StockWithAnalysis, InvestmentHorizon, PriceRsiDivergence } from "@
 import { HORIZON_LABELS } from "@/types/models";
 import type { HorizonAnalysis, AllHorizonsAIAnalysis } from "@/services/aiAnalysisService";
 import { calculateRiskLevel } from "@/lib/riskCalculator";
+import { resolveSector, sectorColor } from "@/lib/sectorUtils";
 import RiskBadge from "@/components/ui/RiskBadge";
 import RemoveStockButton from "./RemoveStockButton";
 import HorizonSelector from "./HorizonSelector";
@@ -167,6 +168,9 @@ export default function StockCard({ stock }: Props) {
 
   const metricsGrid = buildMetricsGrid(horizon, a);
 
+  const sector = stock.sector ?? resolveSector(stock.ticker);
+  const sectorBg = sector ? sectorColor(sector) : null;
+
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-xl shadow-sm p-5 space-y-4">
       {/* Header */}
@@ -175,6 +179,20 @@ export default function StockCard({ stock }: Props) {
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-lg font-bold text-gray-900">{stock.ticker}</h3>
             <span className="text-xs text-gray-400 font-medium">{HORIZON_LABELS[horizon]}</span>
+            {sector && (
+              <span style={{
+                fontSize: 11,
+                fontWeight: 500,
+                padding: "2px 8px",
+                borderRadius: 9999,
+                background: `${sectorBg}22`,
+                border: `1px solid ${sectorBg}66`,
+                color: sectorBg ?? "var(--fg-4)",
+                letterSpacing: ".02em",
+              }}>
+                {sector}
+              </span>
+            )}
           </div>
           {a && (() => {
             // Divisas sin símbolo conocido (DKK, SEK, CHF...) muestran su

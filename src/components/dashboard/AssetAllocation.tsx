@@ -1,44 +1,7 @@
 "use client";
 
 import type { StockWithAnalysis } from "@/types/models";
-
-const CATEGORY_MAP: Record<string, string> = {
-  // ETF RV EE.UU.
-  SPY: "RV EE.UU.", QQQ: "RV EE.UU.", VTI: "RV EE.UU.", IWM: "RV EE.UU.",
-  VOO: "RV EE.UU.", IVV: "RV EE.UU.", SCHB: "RV EE.UU.", VUG: "RV EE.UU.",
-  ONEQ: "RV EE.UU.",
-  // ETF RV Global
-  VT: "RV Global", ACWI: "RV Global", VEA: "RV Global", EFA: "RV Global",
-  VXUS: "RV Global", IXUS: "RV Global",
-  // Renta Fija
-  TLT: "Renta Fija", AGG: "Renta Fija", BND: "Renta Fija", HYG: "Renta Fija",
-  LQD: "Renta Fija", SHY: "Renta Fija", IEF: "Renta Fija", VCIT: "Renta Fija",
-  // Materias Primas / Metales
-  GLD: "Materias Primas", SLV: "Materias Primas", IAU: "Materias Primas",
-  GDX: "Materias Primas", PDBC: "Materias Primas", USO: "Materias Primas",
-  // Cripto
-  GBTC: "Cripto", IBIT: "Cripto", FBTC: "Cripto", ETHA: "Cripto", BITO: "Cripto",
-  // Inmobiliario
-  VNQ: "Inmobiliario", IYR: "Inmobiliario", SCHH: "Inmobiliario",
-};
-
-const EUROPEAN_SUFFIXES = [".MC", ".PA", ".L", ".CO", ".AS", ".MI", ".F", ".DE", ".SW"];
-
-const CATEGORY_COLORS: Record<string, string> = {
-  "RV EE.UU.":       "#3b82f6",
-  "RV Europa":       "#8b5cf6",
-  "RV Global":       "#6366f1",
-  "Renta Fija":      "#22c55e",
-  "Materias Primas": "#f59e0b",
-  "Cripto":          "#ec4899",
-  "Inmobiliario":    "#14b8a6",
-};
-
-function inferCategory(ticker: string): string {
-  if (CATEGORY_MAP[ticker]) return CATEGORY_MAP[ticker];
-  if (EUROPEAN_SUFFIXES.some((s) => ticker.toUpperCase().endsWith(s))) return "RV Europa";
-  return "RV EE.UU.";
-}
+import { resolveSector, sectorColor } from "@/lib/sectorUtils";
 
 interface SliceData {
   label:   string;
@@ -100,7 +63,8 @@ export default function AssetAllocation({ stocks }: Props) {
   for (const s of withValue) {
     const price = s.analysis!.priceUSD ?? s.analysis!.price;
     const val   = price * s.quantity!;
-    const cat   = inferCategory(s.ticker);
+    // Prefer DB sector, then static inference, then "Sin clasificar"
+    const cat   = s.sector ?? resolveSector(s.ticker) ?? "Sin clasificar";
     if (!byCategory[cat]) byCategory[cat] = { value: 0, tickers: [] };
     byCategory[cat].value   += val;
     byCategory[cat].tickers.push(s.ticker);
@@ -109,15 +73,32 @@ export default function AssetAllocation({ stocks }: Props) {
 
   if (totalValue <= 0) return null;
 
-  const slices: SliceData[] = Object.entries(byCategory)
+  // Build raw slices
+  const rawSlices: SliceData[] = Object.entries(byCategory)
     .map(([label, { value, tickers }]) => ({
       label,
       value,
       pct:     (value / totalValue) * 100,
-      color:   CATEGORY_COLORS[label] ?? "#6b7280",
+      color:   sectorColor(label),
       tickers,
     }))
     .sort((a, b) => b.value - a.value);
+
+  // Group < 3% as "Otros"
+  const mainSlices = rawSlices.filter((s) => s.pct >= 3);
+  const otherSlices = rawSlices.filter((s) => s.pct < 3);
+
+  const slices: SliceData[] = [...mainSlices];
+  if (otherSlices.length > 0) {
+    const otherValue = otherSlices.reduce((sum, s) => sum + s.value, 0);
+    slices.push({
+      label:   "Otros",
+      value:   otherValue,
+      pct:     (otherValue / totalValue) * 100,
+      color:   sectorColor("Otros"),
+      tickers: otherSlices.flatMap((s) => s.tickers),
+    });
+  }
 
   const fmtUSD = (n: number) =>
     n.toLocaleString("es-ES", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -125,7 +106,7 @@ export default function AssetAllocation({ stocks }: Props) {
   return (
     <div style={{ borderRadius: 12, border: "1px solid var(--card-border)", background: "var(--card-bg)", padding: "12px 16px" }}>
       <p style={{ margin: "0 0 10px", fontSize: 12, fontWeight: 600, letterSpacing: ".05em", textTransform: "uppercase", color: "var(--fg-5)" }}>
-        Asset Allocation
+        Distribución sectorial
       </p>
 
       <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>

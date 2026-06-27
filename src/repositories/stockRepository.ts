@@ -9,6 +9,7 @@ export type PrismaStock = {
   userId: string;
   isin: string | null;
   name: string | null;
+  sector: string | null;
   investmentHorizon: InvestmentHorizon;
   purchasePrice: number | null;
   purchaseDate: Date | null;
@@ -120,6 +121,13 @@ export async function updateStockPurchaseData(
     where: { ticker_userId: { ticker, userId } },
     data,
   }) as unknown as PrismaStock;
+}
+
+export async function updateStockSector(
+  id: string,
+  sector: string
+): Promise<void> {
+  await prisma.stock.update({ where: { id }, data: { sector } });
 }
 
 export async function removeStock(ticker: string, userId: string): Promise<void> {

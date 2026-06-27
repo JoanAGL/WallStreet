@@ -61,6 +61,7 @@ export interface StockModel {
   purchaseDate: Date | null;
   quantity: number | null;
   currency: string;
+  sector: string | null;
   createdAt: Date;
 }
 

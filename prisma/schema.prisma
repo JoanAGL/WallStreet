@@ -70,6 +70,7 @@ model Stock {
   userId            String
   isin              String?
   name              String?
+  sector            String?
   investmentHorizon InvestmentHorizon @default(SHORT_TERM)
   purchasePrice     Float?
   purchaseDate      DateTime?

@@ -24,7 +24,9 @@ import {
   isPortfolioFresh,
   upsertPortfolioAnalysis,
 } from "@/repositories/portfolioAnalysisRepository";
-import { getStocksWithAnalysis } from "@/repositories/stockRepository";
+import { getStocksWithAnalysis, updateStockSector } from "@/repositories/stockRepository";
+import { fetchStockProfile } from "@/lib/finnhubClient";
+import { resolveSector } from "@/lib/sectorUtils";
 import { prisma } from "@/lib/prisma";
 import { generatePortfolioAnalysis } from "@/services/portfolioAIService";
 import type { StockAnalysisModel, InvestmentHorizon } from "@/types/models";
@@ -286,15 +288,28 @@ async function runFullAnalysis(
 
   const marketResults = await Promise.allSettled(
     staleStocks.map(async (stock): Promise<MarketData> => {
-      const [quoteResult, historicalResult, fundamentalsResult] = await Promise.allSettled([
+      const [quoteResult, historicalResult, fundamentalsResult, profileResult] = await Promise.allSettled([
         withTimeout(getCurrentQuote(stock.ticker),         TIMEOUTS.quote,        `Finnhub:${stock.ticker}`),
         withTimeout(getHistoricalCloses(stock.ticker, 60), TIMEOUTS.historical,   `Yahoo:historical:${stock.ticker}`),
         withTimeout(fetchAllFundamentals(stock.ticker),    TIMEOUTS.fundamentals, `Yahoo:fundamentals:${stock.ticker}`),
+        fetchStockProfile(stock.ticker),  // best-effort sector fetch (cached 1h)
       ]);
 
       if (quoteResult.status        === "rejected") console.warn(`[ORCHESTRATOR] Quote fallback for ${stock.ticker}:`,        quoteResult.reason);
       if (historicalResult.status   === "rejected") console.warn(`[ORCHESTRATOR] Historical fallback for ${stock.ticker}:`,   historicalResult.reason);
       if (fundamentalsResult.status === "rejected") console.warn(`[ORCHESTRATOR] Fundamentals fallback for ${stock.ticker}:`, fundamentalsResult.reason);
+
+      // Update sector in DB (best-effort, non-blocking)
+      if (profileResult.status === "fulfilled") {
+        const sector = resolveSector(stock.ticker, profileResult.value?.finnhubIndustry);
+        if (sector) {
+          updateStockSector(stock.id, sector).catch(() => {});
+        }
+      } else {
+        // Even without a profile, try to resolve from static rules (ETF, crypto, etc.)
+        const sector = resolveSector(stock.ticker);
+        if (sector) updateStockSector(stock.id, sector).catch(() => {});
+      }
 
       const prev = prevQuoteMap.get(stock.id);
       const quote: CurrentQuote = quoteResult.status === "fulfilled"
